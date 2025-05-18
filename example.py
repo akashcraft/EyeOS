@@ -7,7 +7,7 @@ import cv2
 from gaze_tracking import GazeTracking
 
 gaze = GazeTracking()
-webcam = cv2.VideoCapture(0)
+webcam = cv2.VideoCapture(1)
 
 while True:
     # We get a new frame from the webcam
@@ -18,9 +18,12 @@ while True:
 
     frame = gaze.annotated_frame()
     text = ""
-
-    if gaze.is_blinking():
-        text = "Blinking"
+    if gaze.is_left_blinking() and gaze.is_right_blinking():
+        text = "Both blinking"
+    elif gaze.is_left_blinking():
+        text = "Left blinking"
+    elif gaze.is_right_blinking():
+        text = "Right blinking"
     elif gaze.is_right():
         text = "Looking right"
     elif gaze.is_left():
