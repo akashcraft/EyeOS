@@ -1,3 +1,5 @@
+mediapipe
+pyautogui
 dlib==19.24.2
 numpy==1.26.4
 opencv-python==4.10.0.82
