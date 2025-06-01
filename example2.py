@@ -5,6 +5,9 @@ import time
 import math
 from collections import deque
 
+# Disable pyautogui failsafe
+pyautogui.FAILSAFE = False
+
 # Setup
 screen_width, screen_height = pyautogui.size()
 cap = cv2.VideoCapture(0)
@@ -17,9 +20,9 @@ LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
 # Blink logic
-EAR_THRESHOLD = 0.18
-MIN_CONSEC_FRAMES = 3
-CLICK_COOLDOWN = 1.0
+EAR_THRESHOLD = 0.22
+MIN_CONSEC_FRAMES = 2
+CLICK_COOLDOWN = 0.5
 
 left_counter = 0
 right_counter = 0
@@ -53,12 +56,24 @@ while cap.isOpened():
     if results.multi_face_landmarks:
         landmarks = results.multi_face_landmarks[0].landmark
 
-        # Cursor movement
+        # Cursor movement (mapped from center 25% webcam region)
         left_center = landmarks[473]
         right_center = landmarks[468]
         eye_x = (left_center.x + right_center.x) / 2
         eye_y = (left_center.y + right_center.y) / 2
-        pyautogui.moveTo(int(eye_x * screen_width), int(eye_y * screen_height))
+
+        # Define control region (center 25% of webcam frame)
+        x_range = (0.375, 0.625)
+        y_range = (0.375, 0.625)
+
+        # Clamp and normalize eye position
+        eye_x = max(min(eye_x, x_range[1]), x_range[0])
+        eye_y = max(min(eye_y, y_range[1]), y_range[0])
+        norm_x = (eye_x - x_range[0]) / (x_range[1] - x_range[0])
+        norm_y = (eye_y - y_range[0]) / (y_range[1] - y_range[0])
+
+        # Move mouse
+        pyautogui.moveTo(int(norm_x * screen_width), int(norm_y * screen_height))
 
         # EAR calculation with smoothing
         ear_left = get_ear(landmarks, LEFT_EYE)
