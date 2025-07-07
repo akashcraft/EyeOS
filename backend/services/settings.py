@@ -38,6 +38,9 @@ def create_settings(setting_name, setting_value,
     update_file(default_settings_file)
 
 def read_settings(setting_name, settings_file='settings.json'):
+    '''
+    This is used to read setting values in only the current settings file
+    '''
     if not os.path.exists(settings_file):
         return None
 
@@ -50,19 +53,39 @@ def read_settings(setting_name, settings_file='settings.json'):
     return data.get(setting_name)
 
 def write_settings(setting_name, setting_value, setting_file='settings.json'):
-    if not os.path.exists(settings_file):
-        return  # File doesn't exist, nothing to update
-
-    with open(settings_file, 'r') as f:
+    '''
+    This is used to write setting values in only the current settings file
+    '''
+    if not os.path.exists(setting_file):
+        return
+    
+    with open(setting_file, 'r') as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError:
-            return  # Invalid JSON, nothing to update
+            return  
 
     if setting_name not in data:
-        return  # Setting doesn't exist, don't create it
+        return  
 
     data[setting_name] = setting_value
 
-    with open(settings_file, 'w') as f:
+    with open(setting_file, 'w') as f:
         json.dump(data, f, indent=4)
+
+def reset_demo(settings_file='settings.json', default_settings_file='default_settings.json'):
+    '''
+    Used to reset the settings to a based default state.
+    '''
+    if not os.path.exists(default_settings_file):
+        raise FileNotFoundError(f"Default settings file not found: {default_settings_file}")
+
+    with open(default_settings_file, 'r') as src:
+        try:
+            default_data = json.load(src)
+        except json.JSONDecodeError:
+            raise ValueError(f"Default settings file is not valid JSON: {default_settings_file}")
+
+        with open(settings_file, 'w') as dst:
+            json.dump(default_data, dst, indent=4)
+    
