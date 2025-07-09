@@ -27,7 +27,7 @@ combined_data = {
 }
 save_calibration(combined_data)
 
-print("\n✅ All calibrations complete and saved!")
+print("\nAll calibrations complete and saved!")
 
 cap.release()
 cv2.destroyAllWindows()

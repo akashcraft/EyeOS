@@ -22,7 +22,7 @@ class EyeBlinkCalibrator:
         return (vertical1 + vertical2) / (2.0 * horizontal)
 
     def calibrate(self, LEFT_EYE, RIGHT_EYE, save_fn):
-        print("🛠️ Blink Calibration: Please keep your eyes open and face the screen.")
+        print("Blink Calibration: Please keep your eyes open and face the screen.")
         start_time = time.time()
 
         while time.time() - start_time < self.duration:
@@ -46,6 +46,6 @@ class EyeBlinkCalibrator:
         left_avg = sum(self.left_ears) / len(self.left_ears) if self.left_ears else 0.18
         right_avg = sum(self.right_ears) / len(self.right_ears) if self.right_ears else 0.18
         threshold = 0.85 * min(left_avg, right_avg)
-        print(f"✅ EAR Threshold calibrated to: {threshold:.3f}")
+        print(f"AR Threshold calibrated to: {threshold:.3f}")
         save_fn({"EAR_THRESHOLD": threshold})
         return threshold
