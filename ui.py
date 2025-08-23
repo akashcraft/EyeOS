@@ -169,7 +169,7 @@ class ControlBar(ctk.CTk):
             return
         win = ctk.CTkToplevel(self)
         win.title("Settings")
-        win.geometry("360x350")
+        win.geometry("360x375")
         win.resizable(False, False)
         self.settings_window = win
 
@@ -202,6 +202,9 @@ class ControlBar(ctk.CTk):
         move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=self._update_movement_gain)
         move_slider.set(self.tracker.MOVEMENT_GAIN)
         move_slider.pack(fill='x', padx=5, pady=5)
+
+        # Space to pause
+        ctk.CTkLabel(win, text="Space = Toggle, Esc = Quit", text_color="gray").pack(side='top', pady=0)
 
     def _update_left_threshold(self, value):
         self.tracker.EAR_THRESHOLD_LEFT = float(value)
