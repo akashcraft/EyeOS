@@ -7,10 +7,16 @@ Functions include:
     write_settings()
     reset_demo()
     check_resource()
+    _load_settings_dict()
+    _atomic_write_json()
+    export_settings()
 '''
 
 import json
 import os
+import tempfile
+from pathlib import Path
+from typing import Iterable, Optional
 
 def create_settings(setting_name, setting_value,
                     settings_file='settings.json',
@@ -88,4 +94,64 @@ def reset_demo(settings_file='settings.json', default_settings_file='default_set
 
         with open(settings_file, 'w') as dst:
             json.dump(default_data, dst, indent=4)
+
     
+def _load_settings_dict(settings_file: str | os.PathLike = "settings.json") -> dict:
+
+    '''
+    loads the entire settings JSON file into a dictionary, raising clear errors if the file is missing or invalid
+    '''
+    
+    p = Path(settings_file)
+    if not p.exists():
+        raise FileNotFoundError(f"Settings file not found: {p}")
+    try:
+        with p.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Settings file is not valid JSON: {p}") from e
+
+    
+def _atomic_write_json(obj: dict, dest: Path, pretty: bool) -> None:
+
+    '''
+    safely writes a dictionary to a JSON file by creating a temporary file and atomically replacing the destination to prevent partial or corrupted writes
+    '''
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", delete=False, dir=str(dest.parent), encoding="utf-8") as tmp:
+        json.dump(obj, tmp, indent=2 if pretty else None, separators=None if pretty else (",", ":"))
+        tmp_path = Path(tmp.name)
+    os.replace(tmp_path, dest)
+
+def export_settings(
+    dest_path: str | os.PathLike,
+    *,
+    settings_file: str | os.PathLike = "settings.json",
+    include_keys: Optional[Iterable[str]] = None,
+    overwrite: bool = False,
+    pretty: bool = True,
+) -> Path:
+    '''
+    copies the current settings JSON to a specified destination file, with options to filter keys, format output, and control overwriting    dest = Path(dest_path)
+    '''
+    dest = Path(dest_path)
+    if dest.exists() and dest.is_dir():
+        raise IsADirectoryError(f"dest_path points to a directory, expected a file: {dest}")
+
+    if dest.exists() and not overwrite:
+        raise FileExistsError(f"Destination already exists: {dest}")
+
+    settings = _load_settings_dict(settings_file)
+
+    if include_keys is not None:
+        subset = {}
+        for k in include_keys:
+            val = read_settings(k, settings_file=settings_file)
+            if val is not None:
+                subset[k] = val
+        settings = subset
+
+    _atomic_write_json(settings, dest, pretty=pretty)
+    return dest
+
