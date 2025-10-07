@@ -10,7 +10,7 @@ class CursorMovementCalibrator:
         self.wait_time = wait_time
 
     def timed_capture(self, label):
-        print(f"👉 Look {label}. Capturing in {self.wait_time} seconds...")
+        print(f"Look {label}. Capturing in {self.wait_time} seconds...")
         start = time.time()
         collected = []
 
@@ -49,7 +49,7 @@ class CursorMovementCalibrator:
             avg_x = sum(x for x, _ in collected) / len(collected)
             avg_y = sum(y for _, y in collected) / len(collected)
             self.positions[label] = (avg_x, avg_y)
-            print(f"✔ Captured {label}: ({avg_x:.3f}, {avg_y:.3f})")
+            print(f"Captured {label}: ({avg_x:.3f}, {avg_y:.3f})")
 
     def calibrate(self):
         for label in ["CENTER", "LEFT", "RIGHT", "UP", "DOWN"]:
