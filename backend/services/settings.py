@@ -10,6 +10,7 @@ Functions include:
     _load_settings_dict()
     _atomic_write_json()
     export_settings()
+    import_settings()
 '''
 
 import json
@@ -155,3 +156,37 @@ def export_settings(
     _atomic_write_json(settings, dest, pretty=pretty)
     return dest
 
+def import_settings(
+    src_path: str | os.PathLike,
+    *,
+    settings_file: str | os.PathLike = "settings.json",
+    merge: bool = False,
+    pretty: bool = True
+) -> Path:
+    """
+    import_settings loads a settings JSON file from a given location and updates the app’s main settings file, with options to merge, back up, and format the data safely.
+    """
+    src = Path(src_path).expanduser().resolve()
+    dest = Path(settings_file).expanduser().resolve()
+
+    if not src.exists():
+        raise FileNotFoundError(f"Import source not found: {src}")
+
+    try:
+        with src.open("r", encoding="utf-8") as f:
+            imported = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Import source is not valid JSON: {src}") from e
+
+    if merge and dest.exists():
+        try:
+            with dest.open("r", encoding="utf-8") as f:
+                existing = json.load(f)
+        except json.JSONDecodeError:
+            existing = {}
+        merged = {**existing, **imported}
+    else:
+        merged = imported
+
+    _atomic_write_json(merged, dest, pretty=pretty)
+    return dest
