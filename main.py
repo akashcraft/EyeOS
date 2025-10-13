@@ -9,6 +9,8 @@ from collections import deque
 import customtkinter as ctk
 from PIL import Image
 import tkinter.filedialog as fd
+import global_var
+import utilities
 
 # ------------------- GLOBALS -------------------
 pyautogui.FAILSAFE = False
@@ -63,9 +65,13 @@ def tracking_loop():
     global EAR_THRESHOLD_LEFT, EAR_THRESHOLD_RIGHT, MOVEMENT_GAIN
 
     global cap
-    cap = cv2.VideoCapture(0)
-
+    cap = cv2.VideoCapture(utilities.get_camera_input())
     while not stop_event.is_set():
+
+        if global_var.camera_input_changed == True or cap is None:
+            global_var.camera_input_changed = False
+            cap = cv2.VideoCapture(utilities.get_camera_input())
+
         if not tracking_active.is_set():
             time.sleep(0.05)
             continue
@@ -164,6 +170,7 @@ def open_settings():
     dropdown_frame.pack(fill="x", padx=10, pady=5)
     ctk.CTkLabel(dropdown_frame, text="Input Source").pack(anchor="w", padx=5, pady=5)
     ctk.CTkOptionMenu(dropdown_frame, values=["Webcam", "Phone", "Screen Capture"]).pack(fill="x", padx=5, pady=5)
+    #utilities.set_camera_input(1)
 
     # Dark/Light mode toggle
     def toggle_mode(choice):
