@@ -170,7 +170,6 @@ def open_settings():
     dropdown_frame.pack(fill="x", padx=10, pady=5)
     ctk.CTkLabel(dropdown_frame, text="Input Source").pack(anchor="w", padx=5, pady=5)
     ctk.CTkOptionMenu(dropdown_frame, values=["Webcam", "Phone", "Screen Capture"]).pack(fill="x", padx=5, pady=5)
-    #utilities.set_camera_input(1)
 
     # Dark/Light mode toggle
     def toggle_mode(choice):
