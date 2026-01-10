@@ -15,12 +15,13 @@ import utilities
 # ------------------- GLOBALS -------------------
 pyautogui.FAILSAFE = False
 screen_width, screen_height = pyautogui.size()
+isSettingsOpen = False
 
 cap = None
 tracking_active = threading.Event()
 stop_event = threading.Event()
 
-mp_face_mesh = mp.solutions.face_mesh
+mp_face_mesh = mp.solutions.face_mesh # pyright: ignore[reportAttributeAccessIssue]
 face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, max_num_faces=1)
 
 # Eye indices
@@ -68,9 +69,14 @@ def tracking_loop():
     cap = cv2.VideoCapture(utilities.get_camera_input())
     while not stop_event.is_set():
 
-        if global_var.camera_input_changed == True or cap is None:
+        if global_var.camera_input_changed:
             global_var.camera_input_changed = False
+            if cap is not None:
+                cap.release()
             cap = cv2.VideoCapture(utilities.get_camera_input())
+
+        if cap is None or not cap.isOpened():
+            continue
 
         if not tracking_active.is_set():
             time.sleep(0.05)
@@ -158,26 +164,73 @@ def quit_app():
     tracking_active.set()
     root.destroy()
 
-
 def open_settings():
-    win = ctk.CTkToplevel(root)
+    global isSettingsOpen
+    if isSettingsOpen:
+        return
+    settings_btn.configure(state="disabled")
+    win = ctk.CTkToplevel()
     win.title("Settings")
     win.geometry("360x460")
-    win.resizable(False, False)
+    win.attributes("-topmost", True)
+    isSettingsOpen = True
 
-    # Input Dropdown Menus
+    def on_close():
+        global isSettingsOpen
+        isSettingsOpen = False
+        settings_btn.configure(state="normal")
+        win.destroy()
+
+    win.protocol("WM_DELETE_WINDOW", on_close)
+
+    raw_cameras = utilities.get_available_cameras()
+
+    # 3. Create unique display names
+    camera_map = {}
+    for cam in raw_cameras:
+        display_name = f"{cam['name']}" 
+        camera_map[display_name] = cam
+
+    display_names = list(camera_map.keys())
+
+    def on_camera_select(selected_display_name):
+        cam_data = camera_map.get(selected_display_name)
+        if cam_data:
+            utilities.set_camera_input(cam_data["index"])
+
     dropdown_frame = ctk.CTkFrame(win)
-    dropdown_frame.pack(fill="x", padx=10, pady=5)
-    ctk.CTkLabel(dropdown_frame, text="Input Source").pack(anchor="w", padx=5, pady=5)
-    ctk.CTkOptionMenu(dropdown_frame, values=["Webcam", "Phone", "Screen Capture"]).pack(fill="x", padx=5, pady=5)
-    #utilities.set_camera_input(1)
+    dropdown_frame.pack(fill="x", padx=10, pady=(10,5))
+    
+    ctk.CTkLabel(dropdown_frame, text="Select Camera").pack(anchor="w", padx=5)
+
+    camera_menu = ctk.CTkOptionMenu(
+        dropdown_frame, 
+        values=display_names,
+        command=on_camera_select
+    )
+    camera_menu.pack(fill="x", padx=5, pady=10)
+
+    # 4. Set initial selection based on saved index
+    saved_index = utilities.get_camera_input()
+    
+    current_selection = None
+    for name, cam_data in camera_map.items():
+        # Match purely on index
+        if str(cam_data["index"]) == str(saved_index):
+            current_selection = name
+            break
+    
+    if current_selection:
+        camera_menu.set(current_selection)
+    elif display_names:
+        camera_menu.set(display_names[0])
 
     # Dark/Light mode toggle
     def toggle_mode(choice):
         ctk.set_appearance_mode(choice.lower())
 
     mode_frame = ctk.CTkFrame(win)
-    mode_frame.pack(fill="x", padx=10, pady=5)
+    mode_frame.pack(fill="x", padx=10, pady=(5,0))
     ctk.CTkLabel(mode_frame, text="Appearance").pack(anchor="w", padx=5, pady=5)
     ctk.CTkOptionMenu(mode_frame, values=["Dark", "Light"], command=toggle_mode).pack(fill="x", padx=5, pady=5)
 
@@ -194,7 +247,7 @@ def open_settings():
         EAR_THRESHOLD_LEFT = float(v)
         left_val_lbl.configure(text=f"{float(v):.2f}")
 
-    left_slider = ctk.CTkSlider(left_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_left)
+    left_slider = ctk.CTkSlider(left_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_left) # pyright: ignore[reportArgumentType]
     left_slider.set(EAR_THRESHOLD_LEFT)
     left_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -211,7 +264,7 @@ def open_settings():
         EAR_THRESHOLD_RIGHT = float(v)
         right_val_lbl.configure(text=f"{float(v):.2f}")
 
-    right_slider = ctk.CTkSlider(right_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_right)
+    right_slider = ctk.CTkSlider(right_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_right) # pyright: ignore[reportArgumentType]
     right_slider.set(EAR_THRESHOLD_RIGHT)
     right_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -228,7 +281,7 @@ def open_settings():
         MOVEMENT_GAIN = float(v)
         move_val_lbl.configure(text=f"{float(v):.2f}")
 
-    move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain)
+    move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain) # pyright: ignore[reportArgumentType]
     move_slider.set(MOVEMENT_GAIN)
     move_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
