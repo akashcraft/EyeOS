@@ -5,7 +5,7 @@ import global_var
 import os
 import cv2
 import re
-
+import sys
 
 def open_onscreen_keyboard():
     system = platform.system()
@@ -14,11 +14,8 @@ def open_onscreen_keyboard():
         if system == "Windows":
             subprocess.run('start osk', shell=True)
         elif system == "Darwin":
-            # macOS
-            subprocess.run([
-                "osascript", "-e",
-                'tell application "System Events" to key code 28 using {command down, option down}'
-            ])
+            import keyboard as k
+            k.main()
         elif system == "Linux":
             if subprocess.call(["which", "onboard"], stdout=subprocess.DEVNULL) == 0:
                 subprocess.Popen(["onboard"])
@@ -70,3 +67,4 @@ if __name__ == "__main__":
     open_onscreen_keyboard()
     set_camera_input(1)
     print(global_var.camera_input_changed)  # True
+
