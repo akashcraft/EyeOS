@@ -3,17 +3,20 @@ import platform
 import json
 import global_var
 import cv2
-import platform
+import sys
+import os
 
 def open_onscreen_keyboard():
     system = platform.system()
+    # Path to your custom macOS keyboard script
+    mac_script = os.path.join(os.path.dirname(__file__), "keyboard.py")
 
     try:
         if system == "Windows":
             subprocess.run('start osk', shell=True)
         elif system == "Darwin":
-            import keyboard as k
-            k.main()
+            # Popen is non-blocking, so your main app won't freeze
+            subprocess.Popen([sys.executable, mac_script])
         elif system == "Linux":
             if subprocess.call(["which", "onboard"], stdout=subprocess.DEVNULL) == 0:
                 subprocess.Popen(["onboard"])

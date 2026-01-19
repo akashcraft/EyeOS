@@ -330,7 +330,7 @@ status_lbl.pack(side="left", padx=10)
 voice_btn = ctk.CTkButton(bar, text="Voice", image=voice_icon, command=lambda: print("Voice Pressed"), compound="left", font=("Arial", 13))
 voice_btn.pack(side="left", padx=4)
 
-keyboard_btn = ctk.CTkButton(bar, text="Keyboard", image=keyboard_icon, command=lambda: print("Keyboard Pressed"), compound="left", font=("Arial", 13))
+keyboard_btn = ctk.CTkButton(bar, text="Keyboard", image=keyboard_icon, command=utilities.open_onscreen_keyboard, compound="left", font=("Arial", 13))
 keyboard_btn.pack(side="left", padx=4)
 
 settings_btn = ctk.CTkButton(bar, text="Settings", image=settings_icon, command=open_settings, compound="left", font=("Arial", 13))
