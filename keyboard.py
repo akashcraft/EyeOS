@@ -13,6 +13,23 @@ from Quartz import (
     kCGHIDEventTap
 )
 
+def post_text(text: str) -> None:
+    if not text:
+        return
+
+    for ch in text:
+        ev_down = CGEventCreateKeyboardEvent(None, 0, True)
+        if ev_down is None:
+            continue
+        CGEventKeyboardSetUnicodeString(ev_down, 1, ch)
+        CGEventPost(kCGHIDEventTap, ev_down)
+
+        ev_up = CGEventCreateKeyboardEvent(None, 0, False)
+        if ev_up is None:
+            continue
+        CGEventKeyboardSetUnicodeString(ev_up, 1, ch)
+        CGEventPost(kCGHIDEventTap, ev_up)
+
 # Standardized Layout Constants
 GAP = 6
 MARGIN = 15
@@ -32,9 +49,19 @@ class ClickHandler(NSView):
 
     def clicked_(self, sender):
         label = str(sender.title())
-        if label == "Quit": NSApplication.sharedApplication().terminate_(None)
-        if label == "Min": self.window().miniaturize_(None)
-        # Add logic for key presses here...
+
+        if label == "Quit":
+            NSApplication.sharedApplication().terminate_(None)
+            return
+        if label == "Min":
+            self.window().miniaturize_(None)
+            return
+
+        if len(label) == 1 and label.isalpha():
+            post_text(label)
+            return
+
+        return
 
 class KeyView(NSView):
     def isFlipped(self): return True
@@ -68,6 +95,7 @@ def main():
         NSWindowStyleMaskTitled | NSWindowStyleMaskNonactivatingPanel,
         NSBackingStoreBuffered, False
     )
+    panel.setBecomesKeyOnlyIfNeeded_(True)
     
     # Modern macOS "HUD" look
     effect_view = NSVisualEffectView.alloc().initWithFrame_(panel.contentView().bounds())
@@ -98,7 +126,7 @@ def main():
 
     panel.setTitle_("Keypad")
     panel.setLevel_(NSStatusWindowLevel)
-    panel.makeKeyAndOrderFront_(None)
+    panel.orderFront_(None)
     AppHelper.runEventLoop()
 
 if __name__ == "__main__":
