@@ -34,10 +34,11 @@ def post_text(text: str) -> None:
         CGEventPost(kCGHIDEventTap, ev_up)
 
 # Standardized Layout Constants
-GAP = 6
-MARGIN = 15
-KEY_H = 34
-STD_W = 45 # Slightly wider to prevent text clipping
+# Bigger keys (easier gaze/eye-click targets), tighter spacing between keys.
+GAP = 3
+MARGIN = 10
+KEY_H = 40
+STD_W = 50  # Slightly wider to prevent text clipping + adds perceived "padding"
 
 KEYCODES = {
     "RETURN": 36, "TAB": 48, "SPACE": 49, "DELETE": 51, "ESC": 53,
