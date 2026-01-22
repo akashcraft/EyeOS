@@ -33,12 +33,11 @@ def post_text(text: str) -> None:
         CGEventKeyboardSetUnicodeString(ev_up, 1, ch)
         CGEventPost(kCGHIDEventTap, ev_up)
 
-# Standardized Layout Constants
-# Bigger keys (easier gaze/eye-click targets), tighter spacing between keys.
-GAP = 3
+# Bigger keys
+GAP = 8
 MARGIN = 10
-KEY_H = 40
-STD_W = 50  # Slightly wider to prevent text clipping + adds perceived "padding"
+KEY_H = 45
+STD_W = 55
 
 KEYCODES = {
     "RETURN": 36, "TAB": 48, "SPACE": 49, "DELETE": 51, "ESC": 53,
@@ -367,8 +366,10 @@ def main():
             handler.register_button(btn, base_key)
             if key == "HK_DISPLAY":
                 btn.setEnabled_(False)
-            btn.setBezelStyle_(NSBezelStyleRounded)
-            btn.setFont_(NSFont.systemFontOfSize_(12))
+            btn.setBezelStyle_(10)
+            btn.setWantsLayer_(True)
+            btn.layer().setCornerRadius_(6.0) 
+            btn.setFont_(NSFont.boldSystemFontOfSize_(14))
             btn.setTarget_(handler)
             btn.setAction_(b"clicked:")
             container.addSubview_(btn)
