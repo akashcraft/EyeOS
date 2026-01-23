@@ -9,6 +9,7 @@ from collections import deque
 import customtkinter as ctk
 from PIL import Image
 import tkinter.filedialog as fd
+from backend.services import settings
 import global_var
 import utilities
 
@@ -171,7 +172,7 @@ def open_settings():
     settings_btn.configure(state="disabled")
     win = ctk.CTkToplevel()
     win.title("Settings")
-    win.geometry("360x460")
+    win.geometry("360x540")
     win.attributes("-topmost", True)
     isSettingsOpen = True
 
@@ -284,6 +285,22 @@ def open_settings():
     move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain) # pyright: ignore[reportArgumentType]
     move_slider.set(MOVEMENT_GAIN)
     move_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+
+    # Keyboard Gap
+    gap_frame = ctk.CTkFrame(win)
+    gap_frame.pack(fill="x", padx=10, pady=5)
+    gap_frame.columnconfigure(0, weight=1)
+    ctk.CTkLabel(gap_frame, text="On-Screen Keyboard Gap").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+    gap_val_lbl = ctk.CTkLabel(gap_frame, text=f"{settings.read_settings('gap', '.vscode/settings.json', default=10)}") # type: ignore
+    gap_val_lbl.grid(row=0, column=1, sticky="e", padx=5, pady=5)  
+
+    def update_gap(v):
+        settings.write_settings("gap", int(v), ".vscode/settings.json")
+        gap_val_lbl.configure(text=f"{int(v)}")
+
+    gap_slider = ctk.CTkSlider(gap_frame, from_=5, to=40, number_of_steps=35, command=update_gap) # pyright: ignore[reportArgumentType]
+    gap_slider.set(settings.read_settings("gap", ".vscode/settings.json", default=10)) # type: ignore
+    gap_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
     # Import/Export Settings
     def import_settings():

@@ -1,4 +1,5 @@
 {
     "markdown.validate.enabled": false,
-    "camera_input": 0
+    "camera_input": 0,
+    "gap": 10
 }

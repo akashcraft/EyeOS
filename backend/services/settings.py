@@ -44,18 +44,18 @@ def create_settings(setting_name, setting_value,
     update_file(settings_file)
     update_file(default_settings_file)
 
-def read_settings(setting_name, settings_file='settings.json'):
+def read_settings(setting_name, settings_file='settings.json', default=None):
     '''
     This is used to read setting values in only the current settings file
     '''
     if not os.path.exists(settings_file):
-        return None
+        return default
 
     with open(settings_file, 'r') as f:
         try:
             data = json.load(f)
         except json.JSONDecodeError:
-            return None
+            return default
 
     return data.get(setting_name)
 
