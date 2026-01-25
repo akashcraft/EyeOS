@@ -9,7 +9,10 @@ from collections import deque
 import customtkinter as ctk
 from PIL import Image
 import tkinter.filedialog as fd
+from pynput import keyboard
+from pynput.mouse import Button, Controller
 from backend.services import settings
+from backend.services.pedal import PedalHandler
 import global_var
 import utilities
 
@@ -18,18 +21,28 @@ pyautogui.FAILSAFE = False
 screen_width, screen_height = pyautogui.size()
 isSettingsOpen = False
 
+mouse = Controller()
+
 cap = None
 tracking_active = threading.Event()
 stop_event = threading.Event()
 
-mp_face_mesh = mp.solutions.face_mesh # pyright: ignore[reportAttributeAccessIssue]
+# Pedal
+pedal = PedalHandler()
+HOLD_THRESHOLD = 0.35
+press_time = 0
+dragging = False
+hold_timer = None
+
+# ------------------- MEDIAPIPE -------------------
+mp_face_mesh = mp.solutions.face_mesh  # pyright: ignore
 face_mesh = mp_face_mesh.FaceMesh(refine_landmarks=True, max_num_faces=1)
 
 # Eye indices
 LEFT_EYE = [33, 160, 158, 133, 153, 144]
 RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
-# Settings (adjustable by UI)
+# ------------------- SETTINGS -------------------
 EAR_THRESHOLD_LEFT = 0.22
 EAR_THRESHOLD_RIGHT = 0.22
 MOVEMENT_GAIN = 1.0
@@ -47,6 +60,65 @@ last_right_click = 0
 ear_queue_left = deque(maxlen=5)
 ear_queue_right = deque(maxlen=5)
 
+# ------------------- PEDAL CALLBACKS -------------------
+def on_key_press(key):
+    global press_time, dragging, hold_timer
+
+    if key != keyboard.Key.f12:
+        return
+
+    press_time = time.time()
+    pedal.key_down()
+    dragging = False
+
+    def start_drag():
+        global dragging
+        if not dragging:
+            mouse.press(Button.left)
+            dragging = True
+            print("Pedal → DRAG START")
+
+    hold_timer = threading.Timer(HOLD_THRESHOLD, start_drag)
+    hold_timer.start()
+
+def on_key_release(key):
+    global dragging, hold_timer
+
+    if key != keyboard.Key.f12:
+        return
+
+    if hold_timer:
+        hold_timer.cancel()
+
+    action = pedal.key_up()
+
+    # END DRAG
+    if dragging:
+        mouse.release(Button.left)
+        dragging = False
+        print("Pedal → DRAG END")
+        return
+
+    # TAP ACTIONS
+    if action == "SINGLE":
+        mouse.click(Button.left)
+        print("Pedal → LEFT CLICK")
+
+    elif action == "DOUBLE":
+        mouse.click(Button.right)
+        print("Pedal → RIGHT CLICK")
+
+    elif action == "TRIPLE":
+        mouse.click(Button.left, 2)
+        print("Pedal → DOUBLE CLICK")
+
+
+# Start listener ONCE
+keyboard.Listener(
+    on_press=on_key_press,
+    on_release=on_key_release,
+    daemon=True
+).start()
 
 # ------------------- HELPERS -------------------
 def euclidean(p1, p2):
@@ -63,16 +135,15 @@ def get_ear(landmarks, indices):
 
 # ------------------- TRACKING LOOP -------------------
 def tracking_loop():
-    global left_counter, right_counter, last_left_click, last_right_click
-    global EAR_THRESHOLD_LEFT, EAR_THRESHOLD_RIGHT, MOVEMENT_GAIN
-
+    global left_counter, right_counter
+    global last_left_click, last_right_click
     global cap
     cap = cv2.VideoCapture(utilities.get_camera_input())
     while not stop_event.is_set():
 
         if global_var.camera_input_changed:
             global_var.camera_input_changed = False
-            if cap is not None:
+            if cap:
                 cap.release()
             cap = cv2.VideoCapture(utilities.get_camera_input())
 
