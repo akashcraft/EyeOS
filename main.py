@@ -13,6 +13,10 @@ from pynput import keyboard
 from pynput.mouse import Button, Controller
 from backend.services import settings
 from backend.services.pedal import PedalHandler
+from backend.services.mouth_click import MouthClicker
+from backend.services.eyebrow_scroll import EyebrowScroller
+from backend.services.lip_scroll import LipScrollController
+
 import global_var
 import utilities
 
@@ -50,6 +54,13 @@ MOVEMENT_GAIN = 1.0
 MIN_CONSEC_FRAMES = 2
 CLICK_COOLDOWN = 0.5
 
+# Mouth click settings (tune these)
+MOUTH_ARM_RATIO = 0.25
+MOUTH_CLOSE_RATIO = 0.015
+MOUTH_COOLDOWN = 0.35
+MOUTH_DOUBLE_WINDOW = 1.8
+MOUTH_RIGHT_HOLD = 0.7
+
 # Blink counters
 left_counter = 0
 right_counter = 0
@@ -59,6 +70,40 @@ last_right_click = 0
 # EAR smoothing
 ear_queue_left = deque(maxlen=5)
 ear_queue_right = deque(maxlen=5)
+
+# Mouth clicker state machine (per-frame)
+mouth_clicker = MouthClicker(
+    arm_mouth_open_ratio=MOUTH_ARM_RATIO,
+    close_ratio=MOUTH_CLOSE_RATIO,
+    cooldown_sec=MOUTH_COOLDOWN,
+    double_click_window=MOUTH_DOUBLE_WINDOW,
+    right_click_hold_sec=MOUTH_RIGHT_HOLD,
+    show_debug=False,
+)
+# Eyebrow scroller state machine (per-frame)
+eyebrow_scroller = EyebrowScroller(
+    up_threshold=0.03,
+    down_threshold=0.012,
+    scroll_amount=90,
+    repeat_interval=0.14,
+    smooth_window=9,
+    baseline_alpha=0.005,
+    show_debug=False
+)
+# Lip scroll controller state machine (per-frame)
+lip_scroll = LipScrollController(
+    pucker_threshold=0.62,
+    lips_closed_ratio=0.020,
+    toggle_hold_sec=0.55,
+    scroll_amount=90,
+    repeat_interval=0.10,
+    gaze_up_thresh=0.45,
+    gaze_down_thresh=0.55,
+    gaze_deadband=(0.47, 0.52),
+    show_debug=False
+)
+
+
 
 # ------------------- PEDAL CALLBACKS -------------------
 def on_key_press(key):
@@ -138,7 +183,9 @@ def tracking_loop():
     global left_counter, right_counter
     global last_left_click, last_right_click
     global cap
+
     cap = cv2.VideoCapture(utilities.get_camera_input())
+
     while not stop_event.is_set():
 
         if global_var.camera_input_changed:
@@ -151,6 +198,10 @@ def tracking_loop():
             continue
 
         if not tracking_active.is_set():
+            # prevent a "resume click" if you paused while mouth was open
+            mouth_clicker.reset()
+            eyebrow_scroller.reset()
+            lip_scroll.reset()
             time.sleep(0.05)
             continue
 
@@ -184,6 +235,26 @@ def tracking_loop():
 
             pyautogui.moveTo(target_x, target_y)
 
+            now = time.time()
+
+            # ---- Mouth clicks ----
+            if global_var.mouth_click_enabled:
+                mouth_action = mouth_clicker.update(landmarks, now)
+                if mouth_action:
+                    print(f"Mouth → {mouth_action}")
+
+            # ---- Eyebrow scroll ----
+            if global_var.eyebrow_scroll_enabled:
+                scroll_action = eyebrow_scroller.update(landmarks, now)
+                if scroll_action:
+                    print(f"Eyebrow → {scroll_action}")
+
+            # ---- Lip scroll ----
+            if global_var.lip_scroll_enabled:
+                lip_action = lip_scroll.update(landmarks, now)
+                if lip_action:
+                    print(f"LipScroll → {lip_action}")
+
             # EAR blink detection
             ear_left = get_ear(landmarks, LEFT_EYE)
             ear_right = get_ear(landmarks, RIGHT_EYE)
@@ -191,8 +262,6 @@ def tracking_loop():
             ear_queue_right.append(ear_right)
             avg_ear_left = sum(ear_queue_left) / len(ear_queue_left)
             avg_ear_right = sum(ear_queue_right) / len(ear_queue_right)
-
-            now = time.time()
 
             # Left blink
             if avg_ear_left < EAR_THRESHOLD_LEFT:
@@ -260,7 +329,7 @@ def open_settings():
     # 3. Create unique display names
     camera_map = {}
     for cam in raw_cameras:
-        display_name = f"{cam['name']}" 
+        display_name = f"{cam['name']}"
         camera_map[display_name] = cam
 
     display_names = list(camera_map.keys())
@@ -272,11 +341,11 @@ def open_settings():
 
     dropdown_frame = ctk.CTkFrame(win)
     dropdown_frame.pack(fill="x", padx=10, pady=(10,5))
-    
+
     ctk.CTkLabel(dropdown_frame, text="Select Camera").pack(anchor="w", padx=5)
 
     camera_menu = ctk.CTkOptionMenu(
-        dropdown_frame, 
+        dropdown_frame,
         values=display_names,
         command=on_camera_select
     )
@@ -284,14 +353,14 @@ def open_settings():
 
     # 4. Set initial selection based on saved index
     saved_index = utilities.get_camera_input()
-    
+
     current_selection = None
     for name, cam_data in camera_map.items():
         # Match purely on index
         if str(cam_data["index"]) == str(saved_index):
             current_selection = name
             break
-    
+
     if current_selection:
         camera_menu.set(current_selection)
     elif display_names:
@@ -319,7 +388,7 @@ def open_settings():
         EAR_THRESHOLD_LEFT = float(v)
         left_val_lbl.configure(text=f"{float(v):.2f}")
 
-    left_slider = ctk.CTkSlider(left_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_left) # pyright: ignore[reportArgumentType]
+    left_slider = ctk.CTkSlider(left_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_left)  # pyright: ignore[reportArgumentType]
     left_slider.set(EAR_THRESHOLD_LEFT)
     left_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -336,7 +405,7 @@ def open_settings():
         EAR_THRESHOLD_RIGHT = float(v)
         right_val_lbl.configure(text=f"{float(v):.2f}")
 
-    right_slider = ctk.CTkSlider(right_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_right) # pyright: ignore[reportArgumentType]
+    right_slider = ctk.CTkSlider(right_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_right)  # pyright: ignore[reportArgumentType]
     right_slider.set(EAR_THRESHOLD_RIGHT)
     right_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -353,7 +422,7 @@ def open_settings():
         MOVEMENT_GAIN = float(v)
         move_val_lbl.configure(text=f"{float(v):.2f}")
 
-    move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain) # pyright: ignore[reportArgumentType]
+    move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain)  # pyright: ignore[reportArgumentType]
     move_slider.set(MOVEMENT_GAIN)
     move_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -362,15 +431,15 @@ def open_settings():
     gap_frame.pack(fill="x", padx=10, pady=5)
     gap_frame.columnconfigure(0, weight=1)
     ctk.CTkLabel(gap_frame, text="On-Screen Keyboard Gap").grid(row=0, column=0, sticky="w", padx=5, pady=5)
-    gap_val_lbl = ctk.CTkLabel(gap_frame, text=f"{settings.read_settings('gap', '.vscode/settings.json', default=10)}") # type: ignore
-    gap_val_lbl.grid(row=0, column=1, sticky="e", padx=5, pady=5)  
+    gap_val_lbl = ctk.CTkLabel(gap_frame, text=f"{settings.read_settings('gap', '.vscode/settings.json', default=10)}")  # type: ignore
+    gap_val_lbl.grid(row=0, column=1, sticky="e", padx=5, pady=5)
 
     def update_gap(v):
         settings.write_settings("gap", int(v), ".vscode/settings.json")
         gap_val_lbl.configure(text=f"{int(v)}")
 
-    gap_slider = ctk.CTkSlider(gap_frame, from_=5, to=40, number_of_steps=35, command=update_gap) # pyright: ignore[reportArgumentType]
-    gap_slider.set(settings.read_settings("gap", ".vscode/settings.json", default=10)) # type: ignore
+    gap_slider = ctk.CTkSlider(gap_frame, from_=5, to=40, number_of_steps=35, command=update_gap)  # pyright: ignore[reportArgumentType]
+    gap_slider.set(settings.read_settings("gap", ".vscode/settings.json", default=10))  # type: ignore
     gap_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
     # Import/Export Settings

@@ -1,3 +1,120 @@
+import time
+import pyautogui
+
+
+class MouthClicker:
+    """
+    Per-frame mouth gesture click detector.
+
+    Gesture mapping (same behavior as your old script):
+    - Mouth open then close (short open) -> LEFT CLICK
+    - Two mouth opens close together -> DOUBLE CLICK
+    - Hold mouth open long enough -> RIGHT CLICK
+
+    Use:
+        clicker = MouthClicker(...)
+        action = clicker.update(landmarks, now=time.time())
+        if action: print(action)
+    """
+
+    def __init__(
+        self,
+        arm_mouth_open_ratio=0.25,
+        close_ratio=0.015,
+        cooldown_sec=0.35,
+        double_click_window=1.8,
+        right_click_hold_sec=0.7,
+        show_debug=False,
+    ):
+        self.arm_mouth_open_ratio = arm_mouth_open_ratio
+        self.close_ratio = close_ratio
+        self.cooldown_sec = cooldown_sec
+        self.double_click_window = double_click_window
+        self.right_click_hold_sec = right_click_hold_sec
+        self.show_debug = show_debug
+
+        self.reset()
+
+    def reset(self):
+        self.mouth_is_open = False
+        self.open_start_time = 0.0
+        self.right_click_fired = False
+
+        self.last_action_time = 0.0
+        self.last_open_event_time = 0.0
+
+    def update(self, landmarks, now=None):
+        """
+        landmarks: mediapipe face landmarks list (results.multi_face_landmarks[0].landmark)
+        now: optional timestamp (time.time())
+
+        returns: "LEFT CLICK" / "RIGHT CLICK" / "DOUBLE CLICK" / None
+        """
+        if now is None:
+            now = time.time()
+
+        # Mediapipe mouth landmarks
+        left_corner = landmarks[61]
+        right_corner = landmarks[291]
+        upper_lip = landmarks[13]
+        lower_lip = landmarks[14]
+
+        mouth_open = abs(lower_lip.y - upper_lip.y)
+        mouth_width = abs(right_corner.x - left_corner.x) + 1e-6
+        open_ratio = mouth_open / mouth_width
+
+        action = None
+
+        # Transition: closed -> open
+        if (not self.mouth_is_open) and (open_ratio > self.arm_mouth_open_ratio):
+            self.mouth_is_open = True
+            self.open_start_time = now
+            self.right_click_fired = False
+
+            # Double click detection happens on the "open" event
+            if (now - self.last_action_time) > self.cooldown_sec:
+                if (
+                    self.last_open_event_time != 0.0
+                    and (now - self.last_open_event_time) <= self.double_click_window
+                ):
+                    pyautogui.doubleClick()
+                    self.last_action_time = now
+                    self.last_open_event_time = 0.0
+                    action = "DOUBLE CLICK"
+                else:
+                    self.last_open_event_time = now
+
+        # While open
+        elif self.mouth_is_open:
+            # Hold-open -> right click
+            if (
+                (not self.right_click_fired)
+                and (now - self.open_start_time) >= self.right_click_hold_sec
+                and (now - self.last_action_time) > self.cooldown_sec
+            ):
+                pyautogui.rightClick()
+                self.last_action_time = now
+                self.right_click_fired = True
+                action = "RIGHT CLICK"
+
+            # Transition: open -> closed
+            if open_ratio < self.close_ratio:
+                self.mouth_is_open = False
+
+                # If we didn't right-click, then close triggers left click
+                if (
+                    (not self.right_click_fired)
+                    and (now - self.last_action_time) > self.cooldown_sec
+                    and self.last_open_event_time != 0.0
+                ):
+                    pyautogui.leftClick()
+                    self.last_action_time = now
+                    action = "LEFT CLICK"
+
+        return action
+
+
+# Optional: keep a standalone test runner (opens its own camera)
 def mouth_gesture_clicker(
     camera_index=0,
     arm_mouth_open_ratio=0.25,
@@ -5,39 +122,28 @@ def mouth_gesture_clicker(
     cooldown_sec=0.35,
     double_click_window=1.8,
     right_click_hold_sec=0.7,
-    show_debug=False
+    show_debug=True,
 ):
     import cv2
     import mediapipe as mp
-    import pyautogui
-    import time
 
     mp_face = mp.solutions.face_mesh
     face_mesh = mp_face.FaceMesh(
         max_num_faces=1,
         refine_landmarks=True,
         min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
+        min_tracking_confidence=0.5,
     )
 
     cap = cv2.VideoCapture(camera_index)
-
-    mouth_is_open = False
-    open_start_time = 0.0
-    right_click_fired = False
-
-    last_action_time = 0.0
-    last_open_event_time = 0.0
-
-    last_action_label = "NONE"
-    last_action_label_time = 0.0
-
-    def dbg_print(msg):
-        if show_debug:
-            print(msg)
-
-    def lm_xy(lm, w, h):
-        return int(lm.x * w), int(lm.y * h)
+    clicker = MouthClicker(
+        arm_mouth_open_ratio=arm_mouth_open_ratio,
+        close_ratio=close_ratio,
+        cooldown_sec=cooldown_sec,
+        double_click_window=double_click_window,
+        right_click_hold_sec=right_click_hold_sec,
+        show_debug=show_debug,
+    )
 
     while True:
         ret, frame = cap.read()
@@ -45,99 +151,26 @@ def mouth_gesture_clicker(
             break
 
         frame = cv2.flip(frame, 1)
-        h, w, _ = frame.shape
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         res = face_mesh.process(rgb)
 
         now = time.time()
-        status_text = "No face"
+        action = None
 
         if res.multi_face_landmarks:
-            face = res.multi_face_landmarks[0].landmark
-
-            left_corner = face[61]
-            right_corner = face[291]
-            upper_lip = face[13]
-            lower_lip = face[14]
-
-            mouth_open = abs(lower_lip.y - upper_lip.y)
-            mouth_width = abs(right_corner.x - left_corner.x) + 1e-6
-            open_ratio = mouth_open / mouth_width
-
-            if not mouth_is_open and open_ratio > arm_mouth_open_ratio:
-                mouth_is_open = True
-                open_start_time = now
-                right_click_fired = False
-                status_text = "OPEN"
-
-                if (now - last_action_time) > cooldown_sec:
-                    if (now - last_open_event_time) <= double_click_window:
-                        pyautogui.doubleClick()
-                        last_action_label = "DOUBLE CLICK"
-                        last_action_label_time = now
-                        dbg_print(f"[{time.strftime('%H:%M:%S')}] DOUBLE CLICK")
-                        status_text = last_action_label
-                        last_action_time = now
-                        last_open_event_time = 0.0
-                    else:
-                        last_open_event_time = now
-
-            elif mouth_is_open:
-                if (not right_click_fired
-                        and (now - open_start_time) >= right_click_hold_sec
-                        and (now - last_action_time) > cooldown_sec):
-                    pyautogui.rightClick()
-                    last_action_label = "RIGHT CLICK"
-                    last_action_label_time = now
-                    dbg_print(f"[{time.strftime('%H:%M:%S')}] RIGHT CLICK")
-                    status_text = last_action_label
-                    last_action_time = now
-                    right_click_fired = True
-
-                if open_ratio < close_ratio:
-                    mouth_is_open = False
-                    status_text = "CLOSED"
-
-                    if (not right_click_fired
-                            and (now - last_action_time) > cooldown_sec
-                            and last_open_event_time != 0.0):
-                        pyautogui.leftClick()
-                        last_action_label = "LEFT CLICK"
-                        last_action_label_time = now
-                        dbg_print(f"[{time.strftime('%H:%M:%S')}] LEFT CLICK")
-                        status_text = last_action_label
-                        last_action_time = now
+            landmarks = res.multi_face_landmarks[0].landmark
+            action = clicker.update(landmarks, now)
 
         if show_debug:
-            cv2.putText(frame, f"Last: {last_action_label}", (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-            if last_action_label_time > 0:
-                cv2.putText(frame, f"{now - last_action_label_time:.2f}s ago", (10, 85),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-            if res.multi_face_landmarks:
-                lc = lm_xy(left_corner, w, h)
-                rc = lm_xy(right_corner, w, h)
-                ul = lm_xy(upper_lip, w, h)
-                ll = lm_xy(lower_lip, w, h)
-
-                cv2.circle(frame, lc, 3, (0, 255, 0), -1)
-                cv2.circle(frame, rc, 3, (0, 255, 0), -1)
-                cv2.circle(frame, ul, 3, (255, 255, 0), -1)
-                cv2.circle(frame, ll, 3, (255, 255, 0), -1)
-                cv2.line(frame, lc, rc, (0, 255, 0), 1)
-
-                cv2.putText(frame, f"open_ratio={open_ratio:.3f}", (10, 110),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-                if mouth_is_open:
-                    cv2.putText(frame, f"open_for={now - open_start_time:.2f}s", (10, 135),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-
-            cv2.putText(frame, status_text, (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 255, 255), 2)
-
+            cv2.putText(
+                frame,
+                f"Action: {action or 'NONE'}",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.75,
+                (255, 255, 255),
+                2,
+            )
             cv2.imshow("Mouth Clicker (ESC to quit)", frame)
             if cv2.waitKey(1) & 0xFF == 27:
                 break
