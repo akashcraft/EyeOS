@@ -16,6 +16,7 @@ from backend.services.pedal import PedalHandler
 from backend.services.mouth_click import MouthClicker
 from backend.services.eyebrow_scroll import EyebrowScroller
 from backend.services.lip_scroll import LipScrollController
+from backend.services.lip_eyebrow_scroll import LipEyebrowScrollController
 
 import global_var
 import utilities
@@ -102,6 +103,25 @@ lip_scroll = LipScrollController(
     gaze_deadband=(0.47, 0.52),
     show_debug=False
 )
+# Lip + Eyebrow combined scroll controller (per-frame)
+lip_brow_scroll = LipEyebrowScrollController(
+    pucker_threshold=0.62,
+    lips_closed_ratio=0.020,
+    toggle_hold_sec=0.55,
+
+    brow_down_threshold=0.002,   # easier
+    brow_hold_frames=1,          # easier
+
+    scroll_amount=90,
+    repeat_interval=0.12,
+
+    smooth_window=5,
+    baseline_alpha=0.003,
+    baseline_update_band=0.001,
+
+    show_debug=False,
+)
+
 
 
 
@@ -202,6 +222,7 @@ def tracking_loop():
             mouth_clicker.reset()
             eyebrow_scroller.reset()
             lip_scroll.reset()
+            lip_brow_scroll.reset()
             time.sleep(0.05)
             continue
 
@@ -254,6 +275,12 @@ def tracking_loop():
                 lip_action = lip_scroll.update(landmarks, now)
                 if lip_action:
                     print(f"LipScroll → {lip_action}")
+
+            # ---- Lip + Eyebrow scroll ----
+            if global_var.lip_brow_scroll_enabled:
+                sb_action = lip_brow_scroll.update(landmarks, now)
+                if sb_action:
+                    print(f"LipBrowScroll → {sb_action}")
 
             # EAR blink detection
             ear_left = get_ear(landmarks, LEFT_EYE)
