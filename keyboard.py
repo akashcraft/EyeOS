@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import objc
+import os
 from Cocoa import (
     NSApplication, NSPanel, NSButton, NSView, NSMakeRect,
     NSWindowStyleMaskTitled, NSWindowStyleMaskNonactivatingPanel,
@@ -63,6 +64,20 @@ KEYCODES_CHAR = {
     "`": 50,
 }
 
+# --- Prefix completion (wordlist-backed) ---
+# Primary source: backend/models/wordlist.txt
+# Format: one entry per line: `word` OR `word frequency` (frequency is optional; higher = more likely)
+WORDLIST_PATH = os.path.join(os.path.dirname(__file__), "backend", "models", "wordlist.txt")
+
+# Fallback small list so the feature still works if the file is missing/empty.
+FALLBACK_WORDS = [
+    "the","to","and","of","a","in","is","it","you","that","for","on","with","as","are","this","be","or","at","by",
+    "from","not","but","we","they","have","has","had","will","would","can","could","do","does","did","if","then","there","their","what",
+    "when","where","why","how","who","which","because","about","into","out","up","down","over","under","again","more","most","some","any",
+    "work","works","working","done","finish","finished","complete","completion","keyboard","keys","click","mouse","cursor","voice","text","translate",
+    "hello","thanks","thank","please","help","start","stop","open","close","save","copy","paste","delete","space","enter","return","tab"
+]
+
 class ClickHandler(NSView):
     def init(self):
         self = objc.super(ClickHandler, self).init()
@@ -76,6 +91,18 @@ class ClickHandler(NSView):
         self.hotkey_mods = set()  
         self.hotkey_seq = []    
         self._hk_display_btn = None
+
+        # Prefix completion state
+        self._sug_buttons = []  # list[NSButton]
+        self._suggestions = ["", "", ""]
+        self._current_word = ""  # what we've typed since the last delimiter
+
+        # Wordlist index for fast prefix lookup
+        # _word_buckets: dict[str, list[tuple[str,int]]]
+        self._word_buckets = {}
+        self._wordlist_loaded = False
+        self._load_wordlist()
+
         return self
 
     def register_button(self, btn, base_label: str) -> None:
@@ -83,6 +110,8 @@ class ClickHandler(NSView):
         self._base_label[btn] = base_label
         if base_label == "HK_DISPLAY":
             self._hk_display_btn = btn
+        if base_label.startswith("SUG_"):
+            self._sug_buttons.append(btn)
 
     def update_key_labels(self) -> None:
         shifted = {
@@ -199,6 +228,127 @@ class ClickHandler(NSView):
         self.update_key_labels()
         self._update_hotkeys_display()
 
+    def _load_wordlist(self) -> None:
+        """Load and index word suggestions from WORDLIST_PATH.
+
+        Supported formats per line:
+          - word
+          - word frequency
+        Lines starting with # are ignored.
+        """
+        entries = []  # list[tuple[str,int]]
+
+        def _add_word(w: str, freq: int) -> None:
+            w = (w or "").strip().lower()
+            if not w:
+                return
+            # Keep it simple: allow letters, digits, apostrophe, hyphen
+            # (You can relax this later.)
+            for ch in w:
+                if not (ch.isalnum() or ch in ["'", "-"]):
+                    return
+            entries.append((w, int(freq)))
+
+        # Try external wordlist
+        try:
+            if os.path.exists(WORDLIST_PATH):
+                with open(WORDLIST_PATH, "r", encoding="utf-8") as f:
+                    for raw in f:
+                        line = raw.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.split()
+                        if not parts:
+                            continue
+                        if len(parts) == 1:
+                            _add_word(parts[0], 1)
+                        else:
+                            # Word + optional frequency
+                            w = parts[0]
+                            try:
+                                freq = int(parts[1])
+                            except Exception:
+                                freq = 1
+                            _add_word(w, freq)
+        except Exception:
+            # Fall back below
+            pass
+
+        # Fall back if empty
+        if not entries:
+            for w in FALLBACK_WORDS:
+                _add_word(w, 1)
+
+        # Build buckets by first 2 letters for quick lookup
+        buckets = {}
+        for (w, freq) in entries:
+            key = w[:2]
+            if len(key) < 2:
+                # Put 1-letter words in a special bucket
+                key = (key + "_")[:2]
+            buckets.setdefault(key, []).append((w, freq))
+
+        # Sort buckets by (freq desc, word asc)
+        for k in buckets:
+            buckets[k].sort(key=lambda t: (-t[1], t[0]))
+
+        self._word_buckets = buckets
+        self._wordlist_loaded = True
+
+    def _compute_prefix_suggestions(self, prefix: str, k: int = 3):
+        p = (prefix or "").lower()
+        if len(p) < 2:
+            return ["", "", ""]
+
+        bucket_key = p[:2]
+        if len(bucket_key) < 2:
+            bucket_key = (bucket_key + "_")[:2]
+
+        candidates = self._word_buckets.get(bucket_key, [])
+
+        matches = []
+        seen = set()
+        for (w, _freq) in candidates:
+            if w.startswith(p) and w not in seen:
+                seen.add(w)
+                matches.append(w)
+            if len(matches) >= k:
+                break
+
+        while len(matches) < k:
+            matches.append("")
+        return matches
+
+    def _update_suggestion_buttons(self) -> None:
+        # Suggestions are based on the current typed word prefix
+        self._suggestions = self._compute_prefix_suggestions(self._current_word, 3)
+
+        # Ensure deterministic ordering of buttons SUG_0, SUG_1, SUG_2
+        def _idx(btn):
+            base = self._base_label.get(btn, "")
+            try:
+                return int(base.split("_")[1])
+            except Exception:
+                return 999
+
+        for btn in sorted(self._sug_buttons, key=_idx):
+            base = self._base_label.get(btn, "")
+            try:
+                i = int(base.split("_")[1])
+            except Exception:
+                i = None
+
+            title = ""
+            if i is not None and 0 <= i < len(self._suggestions):
+                title = self._suggestions[i]
+
+            btn.setTitle_(title if title else "—")
+            btn.setEnabled_(bool(title))
+
+    def _reset_current_word(self) -> None:
+        self._current_word = ""
+        self._update_suggestion_buttons()
+
     def clicked_(self, sender):
         label = str(sender.title())
         base_label = self._base_label.get(sender, label.rstrip("*"))
@@ -254,14 +404,19 @@ class ClickHandler(NSView):
 
         if base_label == "TAB":
             self._send_keycode(KEYCODES["TAB"], 0)
+            self._reset_current_word()
             return
 
         if base_label == "RETURN":
             self._send_keycode(KEYCODES["RETURN"], 0)
+            self._reset_current_word()
             return
 
         if base_label == "DELETE":
             self._send_keycode(KEYCODES["DELETE"], 0)
+            if self._current_word:
+                self._current_word = self._current_word[:-1]
+            self._update_suggestion_buttons()
             return
 
         if base_label in ["LEFT", "RIGHT", "UP", "DOWN"]:
@@ -278,8 +433,27 @@ class ClickHandler(NSView):
             self.update_key_labels()
             return
 
+        # Accept a prefix suggestion (inserts the remainder + a trailing space)
+        if base_label.startswith("SUG_"):
+            try:
+                idx = int(base_label.split("_")[1])
+            except Exception:
+                idx = -1
+
+            if 0 <= idx < len(self._suggestions):
+                choice = self._suggestions[idx]
+                prefix = (self._current_word or "").lower()
+                if choice and choice.startswith(prefix):
+                    remainder = choice[len(prefix):]
+                    if remainder:
+                        post_text(remainder)
+                    post_text(" ")
+                self._reset_current_word()
+            return
+
         if base_label == "SPACE":
             post_text(" ")
+            self._reset_current_word()
             return
 
         if len(base_label) == 1:
@@ -301,6 +475,14 @@ class ClickHandler(NSView):
                     out = shifted[base_label]
 
             post_text(out)
+
+            # Update current prefix tracking
+            if out.isalnum() or out in ["'", "-"]:
+                self._current_word += out.lower()
+            else:
+                self._reset_current_word()
+
+            self._update_suggestion_buttons()
             return
 
         return
@@ -310,6 +492,7 @@ class KeyView(NSView):
 
 def get_key_width(key):
     """Calculates specific widths to ensure text fits and rows align."""
+    if key in ["SUG1", "SUG2", "SUG3"]: return STD_W * 4.2
     if key in ["RETURN", "DELETE", "TAB", "Shift", "CAPS", "CMD", "OPT", "CTRL", "HotKeys", "Run", "Clear"]: return STD_W * 1.8
     if key == "HK_DISPLAY": return STD_W * 6
     if key == "SPACE": return STD_W * 4
@@ -321,6 +504,7 @@ def main():
     
     # Organized rows
     rows = [
+        ["SUG1", "SUG2", "SUG3"],
         ["ESC", "`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "DELETE"],
         ["TAB", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "\\"],
         ["CAPS", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "RETURN"],
@@ -365,6 +549,12 @@ def main():
                 base_key = "HK_RUN"
             elif key == "Clear":
                 base_key = "HK_CLEAR"
+            elif key == "SUG1":
+                base_key = "SUG_0"
+            elif key == "SUG2":
+                base_key = "SUG_1"
+            elif key == "SUG3":
+                base_key = "SUG_2"
             handler.register_button(btn, base_key)
             if key == "HK_DISPLAY":
                 btn.setEnabled_(False)
@@ -380,6 +570,7 @@ def main():
 
     handler.update_key_labels()
     handler._update_hotkeys_display()
+    handler._update_suggestion_buttons()
     panel.setTitle_("Keypad")
     panel.setLevel_(NSStatusWindowLevel)
     panel.orderFront_(None)
