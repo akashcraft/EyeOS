@@ -64,12 +64,8 @@ KEYCODES_CHAR = {
     "`": 50,
 }
 
-# --- Prefix completion (wordlist-backed) ---
-# Primary source: backend/models/wordlist.txt
-# Format: one entry per line: `word` OR `word frequency` (frequency is optional; higher = more likely)
 WORDLIST_PATH = os.path.join(os.path.dirname(__file__), "backend", "models", "wordlist.txt")
 
-# Fallback small list so the feature still works if the file is missing/empty.
 FALLBACK_WORDS = [
     "the","to","and","of","a","in","is","it","you","that","for","on","with","as","are","this","be","or","at","by",
     "from","not","but","we","they","have","has","had","will","would","can","could","do","does","did","if","then","there","their","what",
@@ -92,13 +88,10 @@ class ClickHandler(NSView):
         self.hotkey_seq = []    
         self._hk_display_btn = None
 
-        # Prefix completion state
-        self._sug_buttons = []  # list[NSButton]
+        self._sug_buttons = []  
         self._suggestions = ["", "", ""]
-        self._current_word = ""  # what we've typed since the last delimiter
+        self._current_word = ""  
 
-        # Wordlist index for fast prefix lookup
-        # _word_buckets: dict[str, list[tuple[str,int]]]
         self._word_buckets = {}
         self._wordlist_loaded = False
         self._load_wordlist()
@@ -229,27 +222,16 @@ class ClickHandler(NSView):
         self._update_hotkeys_display()
 
     def _load_wordlist(self) -> None:
-        """Load and index word suggestions from WORDLIST_PATH.
-
-        Supported formats per line:
-          - word
-          - word frequency
-        Lines starting with # are ignored.
-        """
-        entries = []  # list[tuple[str,int]]
-
+        entries = []  
         def _add_word(w: str, freq: int) -> None:
             w = (w or "").strip().lower()
             if not w:
                 return
-            # Keep it simple: allow letters, digits, apostrophe, hyphen
-            # (You can relax this later.)
             for ch in w:
                 if not (ch.isalnum() or ch in ["'", "-"]):
                     return
             entries.append((w, int(freq)))
 
-        # Try external wordlist
         try:
             if os.path.exists(WORDLIST_PATH):
                 with open(WORDLIST_PATH, "r", encoding="utf-8") as f:
@@ -263,7 +245,6 @@ class ClickHandler(NSView):
                         if len(parts) == 1:
                             _add_word(parts[0], 1)
                         else:
-                            # Word + optional frequency
                             w = parts[0]
                             try:
                                 freq = int(parts[1])
@@ -271,24 +252,19 @@ class ClickHandler(NSView):
                                 freq = 1
                             _add_word(w, freq)
         except Exception:
-            # Fall back below
             pass
 
-        # Fall back if empty
         if not entries:
             for w in FALLBACK_WORDS:
                 _add_word(w, 1)
 
-        # Build buckets by first 2 letters for quick lookup
         buckets = {}
         for (w, freq) in entries:
             key = w[:2]
             if len(key) < 2:
-                # Put 1-letter words in a special bucket
                 key = (key + "_")[:2]
             buckets.setdefault(key, []).append((w, freq))
 
-        # Sort buckets by (freq desc, word asc)
         for k in buckets:
             buckets[k].sort(key=lambda t: (-t[1], t[0]))
 
@@ -320,10 +296,8 @@ class ClickHandler(NSView):
         return matches
 
     def _update_suggestion_buttons(self) -> None:
-        # Suggestions are based on the current typed word prefix
         self._suggestions = self._compute_prefix_suggestions(self._current_word, 3)
 
-        # Ensure deterministic ordering of buttons SUG_0, SUG_1, SUG_2
         def _idx(btn):
             base = self._base_label.get(btn, "")
             try:
@@ -433,7 +407,6 @@ class ClickHandler(NSView):
             self.update_key_labels()
             return
 
-        # Accept a prefix suggestion (inserts the remainder + a trailing space)
         if base_label.startswith("SUG_"):
             try:
                 idx = int(base_label.split("_")[1])
@@ -476,7 +449,6 @@ class ClickHandler(NSView):
 
             post_text(out)
 
-            # Update current prefix tracking
             if out.isalnum() or out in ["'", "-"]:
                 self._current_word += out.lower()
             else:
