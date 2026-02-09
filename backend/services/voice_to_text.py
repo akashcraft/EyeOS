@@ -1,4 +1,5 @@
-"""EyeOS Voice-to-Text Service
+"""
+EyeOS Voice-to-Text Service (Cross-Platform)
 
 Goal:
 - Press a global hotkey to START listening.
@@ -8,8 +9,10 @@ Goal:
 
 Dependencies:
   pip install vosk sounddevice pynput
-  # Optional UI overlay on macOS:
-  # pip install pyobjc
+  # Windows (for better focus restore):
+  pip install pywin32 psutil
+  # Optional macOS overlay:
+  pip install pyobjc
 
 Model:
 - Download a Vosk model (e.g., vosk-model-small-en-us-0.15)
@@ -19,7 +22,7 @@ Model:
 macOS notes:
 - For "type into other apps" to work, your Python process/app will need
   Accessibility permission: System Settings -> Privacy & Security -> Accessibility.
-- Global hotkeys may also require Input Monitoring permission (Privacy & Security -> Input Monitoring) for the app you run this from (Terminal/Python/VSCodium).
+- Global hotkeys may also require Input Monitoring permission.
 - For microphone: Privacy & Security -> Microphone.
 
 Hotkey:
@@ -32,12 +35,13 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 import queue
 
 import sounddevice as sd
@@ -45,10 +49,49 @@ from pynput import keyboard
 from pynput.keyboard import Controller
 from vosk import KaldiRecognizer, Model
 
-# GUI is optional. We import lazily in `run_gui()` to avoid hard failures on systems
-# without Tkinter.
+SYSTEM = platform.system()
 
 
+# ----------------------------
+# Optional Windows imports (lazy)
+# ----------------------------
+_WIN_OK = False
+if SYSTEM == "Windows":
+    try:
+        import psutil
+        import win32gui
+        import win32process
+
+        _WIN_OK = True
+    except Exception:
+        _WIN_OK = False
+
+
+def _is_our_process_windows(pid: int) -> bool:
+    """Best-effort: ignore windows that belong to our current python process, plus common dev shells."""
+    if not _WIN_OK:
+        return False
+    try:
+        me = psutil.Process().pid
+        if pid == me:
+            return True
+        name = psutil.Process(pid).name().lower()
+        return name in {
+            "python.exe",
+            "pythonw.exe",
+            "cmd.exe",
+            "powershell.exe",
+            "windowsterminal.exe",
+            "code.exe",
+            "code - insiders.exe",
+        }
+    except Exception:
+        return False
+
+
+# ----------------------------
+# GUI (Tkinter) — cross-platform
+# ----------------------------
 def run_gui(service: "VoiceToTextService") -> None:
     """Run a minimal start/stop GUI (non-blocking hotkeys still work)."""
     try:
@@ -56,8 +99,6 @@ def run_gui(service: "VoiceToTextService") -> None:
         from tkinter import ttk
     except Exception as e:
         print(f"[VoiceToText] GUI unavailable (tkinter import failed): {e}")
-        print("[VoiceToText] Tip: On macOS, make sure you're using a Python build with Tk support.")
-        # Fall back to hotkey-only mode
         service.start_hotkey_listener()
         return
 
@@ -68,19 +109,17 @@ def run_gui(service: "VoiceToTextService") -> None:
     status_var = tk.StringVar(value="Idle")
 
     def refresh_status() -> None:
-        # Track the last non-GUI frontmost app so clicking the GUI doesn't break typing target.
-        service._update_last_external_app()
+        service._update_last_external_target()
         status_var.set("Listening" if service._is_recording else "Idle")
         toggle_btn.configure(text="Stop" if service._is_recording else "Start")
         root.after(150, refresh_status)
 
     def on_toggle() -> None:
-        # Toggle start/stop. If the GUI stole focus, we restore focus to the last external app.
         service.toggle()
         if service.config.restore_focus_to_target_app:
-            target = service._target_app_name or service._last_external_app_name
-            if target:
-                service._activate_app(target)
+            target = service._target_token or service._last_external_token
+            if target is not None:
+                service._activate_target(target)
 
     def on_quit() -> None:
         try:
@@ -92,13 +131,15 @@ def run_gui(service: "VoiceToTextService") -> None:
                 pass
             root.destroy()
 
-    # Start global hotkeys so F8/F9 work even with the GUI.
-    service._hotkeys.start()
+    try:
+        service._hotkeys.start()
+    except Exception:
+        pass
 
     frame = ttk.Frame(root, padding=14)
     frame.grid(row=0, column=0)
 
-    title = ttk.Label(frame, text="Voice-to-Text", font=("-apple-system", 16, "bold"))
+    title = ttk.Label(frame, text="Voice-to-Text", font=("TkDefaultFont", 16, "bold"))
     title.grid(row=0, column=0, columnspan=2, sticky="w")
 
     status_lbl = ttk.Label(frame, textvariable=status_var)
@@ -112,7 +153,7 @@ def run_gui(service: "VoiceToTextService") -> None:
 
     hint = ttk.Label(
         frame,
-        text=f"Hotkeys: F8 toggle listen | F9 type test\nGUI won’t steal focus: it restores to your last app (WhatsApp/Word/etc.)",
+        text="Hotkeys: F8 toggle listen | F9 type test",
         foreground="#666666",
     )
     hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
@@ -125,19 +166,21 @@ def run_gui(service: "VoiceToTextService") -> None:
     root.mainloop()
 
 
-# ---- macOS Overlay Panel (HUD) ----
+# ----------------------------
+# macOS Overlay Panel (HUD) — macOS only
+# ----------------------------
 def run_overlay(service: "VoiceToTextService") -> None:
-    """Run a macOS non-activating floating Start/Stop button.
-
-    This is the same trick used in `keyboard.py`: an `NSPanel` with
-    `NSWindowStyleMaskNonactivatingPanel` can be clicked without stealing focus
-    from the active app (WhatsApp/Word/etc.).
-
-    Hotkeys (F8/F9) still work while the overlay is up.
-
-    Requires: `pip install pyobjc` (macOS only). If PyObjC isn't available, we
-    fall back to `run_gui()`.
     """
+    Run a macOS non-activating floating Start/Stop button.
+
+    Requires: `pip install pyobjc` (macOS only). If PyObjC isn't available,
+    fall back to Tk GUI.
+    """
+    if SYSTEM != "Darwin":
+        print("[VoiceToText] Overlay is macOS-only. Falling back to Tk GUI...")
+        run_gui(service)
+        return
+
     try:
         import objc
         from Cocoa import (
@@ -155,6 +198,7 @@ def run_overlay(service: "VoiceToTextService") -> None:
             NSVisualEffectBlendingModeBehindWindow,
             NSFont,
             NSObject,
+            NSTextField,
         )
         from PyObjCTools import AppHelper
         import Foundation
@@ -164,7 +208,6 @@ def run_overlay(service: "VoiceToTextService") -> None:
         run_gui(service)
         return
 
-    # Start global hotkeys so F8/F9 work even with the overlay.
     try:
         service._hotkeys.start()
     except Exception:
@@ -172,7 +215,6 @@ def run_overlay(service: "VoiceToTextService") -> None:
 
     _app = NSApplication.sharedApplication()
 
-    # Small HUD-style non-activating panel.
     panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
         NSMakeRect(40, 80, 360, 118),
         NSWindowStyleMaskTitled | NSWindowStyleMaskNonactivatingPanel,
@@ -180,14 +222,12 @@ def run_overlay(service: "VoiceToTextService") -> None:
         False,
     )
 
-    # Key bits: don't steal focus.
     panel.setBecomesKeyOnlyIfNeeded_(True)
     panel.setHidesOnDeactivate_(False)
     panel.setFloatingPanel_(True)
     panel.setLevel_(NSStatusWindowLevel)
     panel.setTitle_("Voice")
 
-    # Modern macOS HUD look (similar to keyboard.py).
     effect_view = NSVisualEffectView.alloc().initWithFrame_(panel.contentView().bounds())
     effect_view.setMaterial_(NSVisualEffectMaterialHUDWindow)
     effect_view.setBlendingMode_(NSVisualEffectBlendingModeBehindWindow)
@@ -203,7 +243,6 @@ def run_overlay(service: "VoiceToTextService") -> None:
             return self
 
         def clicked_(self, _sender):
-            # Toggle start/stop. Panel should not take focus.
             service.toggle()
             self._refresh()
 
@@ -216,24 +255,19 @@ def run_overlay(service: "VoiceToTextService") -> None:
                 self._partial.setStringValue_(service.get_partial())
 
         def tick_(self, _timer):
-            # Keep UI synced if toggled via hotkey.
             self._refresh()
 
     controller = OverlayController.alloc().init()
 
-    # Button
     btn = NSButton.alloc().initWithFrame_(NSMakeRect(14, 62, 120, 36))
     btn.setTitle_("Start")
-    btn.setBezelStyle_(10)  # rounded
+    btn.setBezelStyle_(10)
     btn.setAlignment_(NSTextAlignmentCenter)
     btn.setFont_(NSFont.boldSystemFontOfSize_(14))
     btn.setTarget_(controller)
     btn.setAction_(b"clicked:")
 
-    # Status label (NSTextField)
-    from Cocoa import NSTextField
-
-    status = NSTextField.alloc().initWithFrame_(NSMakeRect(154, 26, 70, 22))
+    status = NSTextField.alloc().initWithFrame_(NSMakeRect(154, 62, 190, 22))
     status.setBezeled_(False)
     status.setDrawsBackground_(False)
     status.setEditable_(False)
@@ -251,15 +285,13 @@ def run_overlay(service: "VoiceToTextService") -> None:
     partial.setLineBreakMode_(0)
 
     controller._partial = partial
-    effect_view.addSubview_(partial)
-
     controller._btn = btn
     controller._status = status
 
     effect_view.addSubview_(btn)
     effect_view.addSubview_(status)
+    effect_view.addSubview_(partial)
 
-    # Timer to refresh title/status.
     Foundation.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
         0.2, controller, b"tick:", None, True
     )
@@ -269,19 +301,23 @@ def run_overlay(service: "VoiceToTextService") -> None:
     AppHelper.runEventLoop()
 
 
+# ----------------------------
+# Service
+# ----------------------------
 @dataclass
 class VoiceToTextConfig:
-    hotkey: str = "<f8>"  # pynput GlobalHotKeys format
-    test_hotkey: str = "<f9>"  # types a test string into the focused app
+    hotkey: str = "<f8>"
+    test_hotkey: str = "<f9>"
     samplerate: int = 16000
     channels: int = 1
-    blocksize: int = 8000  # ~0.5s at 16kHz (bytes depend on dtype)
-    dtype: str = "int16"   # Vosk expects 16-bit PCM
-    model_path: Optional[str] = None  # if None, auto-detect
+    dtype: str = "int16"
+    model_path: Optional[str] = None
     type_trailing_space: bool = True
+
     restore_focus_to_target_app: bool = True
-    live_typing: bool = True  # type words as they become stable (using partial results)
-    live_flush_interval_s: float = 0.12  # how often we flush queued text to the OS
+
+    live_typing: bool = True
+    live_flush_interval_s: float = 0.12
 
 
 class VoiceToTextService:
@@ -294,9 +330,14 @@ class VoiceToTextService:
         self._stop_event = threading.Event()
         self._is_recording = False
         self._worker_thread: Optional[threading.Thread] = None
-        self._target_app_name: Optional[str] = None
-        self._last_external_app_name: Optional[str] = None
-        self._gui_app_names = {"Python", "Wish", "Terminal", "iTerm2", "VSCodium", "Visual Studio Code"}
+
+        # Cross-platform focus tokens:
+        # - macOS: app name (str)
+        # - Windows: hwnd (int)
+        # - Others: None
+        self._target_token: Optional[Any] = None
+        self._last_external_token: Optional[Any] = None
+
         self._ui_lock = threading.Lock()
         self._latest_partial = ""
 
@@ -311,12 +352,10 @@ class VoiceToTextService:
     # ----------------------------
     # Public API
     # ----------------------------
-
     def start_hotkey_listener(self) -> None:
-        """Start listening for the hotkey (blocking)."""
         print(
-            f"[VoiceToText] Hotkey listener started. Toggle listen: {self.config.hotkey} | "
-            f"Type test: {self.config.test_hotkey}"
+            f"[VoiceToText] Hotkey listener started. Toggle: {self.config.hotkey} | "
+            f"Test type: {self.config.test_hotkey}"
         )
         self._hotkeys.start()
         try:
@@ -329,24 +368,23 @@ class VoiceToTextService:
             self._hotkeys.stop()
 
     def toggle(self) -> None:
-        """Toggle recording on/off."""
         if self._is_recording:
             self.stop()
         else:
-            # Prefer the last external app (e.g., WhatsApp/Word) if we have one.
-            if self.config.restore_focus_to_target_app and self._last_external_app_name:
-                self.start(target_app_override=self._last_external_app_name)
+            if self.config.restore_focus_to_target_app and self._last_external_token is not None:
+                self.start(target_override=self._last_external_token)
             else:
                 self.start()
 
     def type_test(self) -> None:
-        """Type a known string into the currently focused app (permission/debug check)."""
-        app_name = None
+        token = None
         if self.config.restore_focus_to_target_app:
-            app_name = self._last_external_app_name or self._get_frontmost_app_name()
-        if app_name:
-            self._activate_app(app_name)
+            token = self._last_external_token or self._get_frontmost_target()
+
+        if token is not None:
+            self._activate_target(token)
             time.sleep(0.08)
+
         test_text = "[VoiceToText TEST] "
         print(f"[VoiceToText] Typing test -> {test_text!r}")
         try:
@@ -354,18 +392,18 @@ class VoiceToTextService:
         except Exception as e:
             print(f"[VoiceToText] ERROR typing test: {e}")
 
-    def start(self, target_app_override: Optional[str] = None) -> None:
+    def start(self, target_override: Optional[Any] = None) -> None:
         if self._is_recording:
             return
 
         self._stop_event.clear()
-        if self.config.restore_focus_to_target_app:
-            # If the GUI stole focus, use the last external app we tracked.
-            self._target_app_name = target_app_override or self._get_frontmost_app_name()
-            if self._target_app_name:
-                print(f"[VoiceToText] Target app captured: {self._target_app_name}")
-        self._is_recording = True
 
+        if self.config.restore_focus_to_target_app:
+            self._target_token = target_override or self._get_frontmost_target()
+            if self._target_token is not None:
+                print(f"[VoiceToText] Target captured: {self._target_token!r}")
+
+        self._is_recording = True
         self._worker_thread = threading.Thread(target=self._record_transcribe_type, daemon=True)
         self._worker_thread.start()
         print("[VoiceToText] Listening... (press hotkey again to stop)")
@@ -382,29 +420,105 @@ class VoiceToTextService:
             self._worker_thread.join(timeout=2.0)
 
     # ----------------------------
-    # Internals
+    # Focus capture/restore
     # ----------------------------
+    def _get_frontmost_target(self) -> Optional[Any]:
+        """Return platform-specific 'focus token'."""
+        if SYSTEM == "Darwin":
+            try:
+                proc = subprocess.run(
+                    [
+                        "osascript",
+                        "-e",
+                        'tell application "System Events" to get name of first application process whose frontmost is true',
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                name = (proc.stdout or "").strip()
+                return name or None
+            except Exception:
+                return None
 
+        if SYSTEM == "Windows" and _WIN_OK:
+            try:
+                hwnd = win32gui.GetForegroundWindow()
+                return int(hwnd) if hwnd else None
+            except Exception:
+                return None
+
+        return None
+
+    def _activate_target(self, token: Any) -> None:
+        """Bring the captured target back to the front (best-effort)."""
+        if token is None:
+            return
+
+        if SYSTEM == "Darwin":
+            try:
+                subprocess.run(
+                    ["osascript", "-e", f'tell application "{token}" to activate'],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except Exception:
+                pass
+            return
+
+        if SYSTEM == "Windows" and _WIN_OK:
+            try:
+                hwnd = int(token)
+                if not win32gui.IsWindow(hwnd):
+                    return
+                win32gui.ShowWindow(hwnd, 9)
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            return
+
+    def _update_last_external_target(self) -> None:
+        """Track last frontmost target that is NOT our own process/dev shells (Windows) or GUI-like apps (macOS)."""
+        token = self._get_frontmost_target()
+        if token is None:
+            return
+
+        if SYSTEM == "Darwin":
+            name = token
+            if name in {"Python", "Wish", "Terminal", "iTerm2", "VSCodium", "Visual Studio Code"}:
+                return
+            self._last_external_token = name
+            return
+
+        if SYSTEM == "Windows" and _WIN_OK:
+            hwnd = int(token)
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if _is_our_process_windows(pid):
+                    return
+            except Exception:
+                return
+            self._last_external_token = hwnd
+            return
+
+    # ----------------------------
+    # Model path + UI partial
+    # ----------------------------
     def _resolve_model_path(self) -> str:
-        """Resolve Vosk model path from config/env/default."""
-        # 1) Explicit config
         if self.config.model_path:
             return self.config.model_path
 
-        # 2) Environment variable
         env_path = os.getenv("VOSK_MODEL_PATH")
         if env_path:
             return env_path
 
-        # 3) Repo default: backend/models/<vosk-model-small-en-us-0.15>
-        # This file lives at: EyeOS/backend/services/voice_to_text.py
         backend_dir = Path(__file__).resolve().parents[1]
         models_dir = backend_dir / "models"
         candidate = models_dir / "vosk-model-small-en-us-0.15"
         if candidate.exists():
             return str(candidate)
 
-        # 4) Fallback: models_dir/<any vosk-model-*>
         if models_dir.exists():
             for p in sorted(models_dir.glob("vosk-model-*/")):
                 return str(p)
@@ -414,50 +528,6 @@ class VoiceToTextService:
             "or place a model under backend/models/ (e.g., vosk-model-small-en-us-0.15)."
         )
 
-    def _get_frontmost_app_name(self) -> Optional[str]:
-        """Return the frontmost macOS application name (best-effort)."""
-        if os.name != "posix":
-            return None
-        try:
-            proc = subprocess.run(
-                [
-                    "osascript",
-                    "-e",
-                    'tell application "System Events" to get name of first application process whose frontmost is true',
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            name = (proc.stdout or "").strip()
-            return name or None
-        except Exception:
-            return None
-
-    def _activate_app(self, app_name: str) -> None:
-        """Bring a macOS app to the front (best-effort)."""
-        if os.name != "posix":
-            return
-        try:
-            subprocess.run(
-                ["osascript", "-e", f'tell application "{app_name}" to activate'],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except Exception:
-            pass
-
-    def _update_last_external_app(self) -> None:
-        """Track the most recent frontmost app that is NOT this script/GUI."""
-        name = self._get_frontmost_app_name()
-        if not name:
-            return
-        if name in self._gui_app_names:
-            return
-        # Record as last known external target
-        self._last_external_app_name = name
-
     def _ui_set_partial(self, text: str) -> None:
         with self._ui_lock:
             self._latest_partial = text
@@ -466,19 +536,19 @@ class VoiceToTextService:
         with self._ui_lock:
             return self._latest_partial
 
+    # ----------------------------
+    # Audio + Vosk + typing
+    # ----------------------------
     def _record_transcribe_type(self) -> None:
-        """Record until stop, transcribe with Vosk, and type into active app."""
         recognizer = KaldiRecognizer(self._model, self.config.samplerate)
         recognizer.SetWords(True)
 
-        # We collect final segments to produce a clean final string.
         segments: list[str] = []
         out_q: "queue.Queue[str]" = queue.Queue()
-        committed_words: list[str] = []  # words already typed in live mode
+        committed_words: list[str] = []
         activated_once = False
 
         def _enqueue_words(text: str) -> None:
-            # Enqueue a string of words to type (adds trailing space).
             t = (text or "").strip()
             if not t:
                 return
@@ -491,15 +561,13 @@ class VoiceToTextService:
 
         def on_audio(indata: bytes, frames: int, time_info, status) -> None:
             if status:
-                # Non-fatal warnings (over/under-runs) can happen.
                 print(f"[VoiceToText] Audio status: {status}")
 
             if self._stop_event.is_set():
                 return
 
-            data = bytes(indata)  # cffi buffer -> bytes for Vosk
+            data = bytes(indata)
             if recognizer.AcceptWaveform(data):
-                # A finalized segment (more stable than partial).
                 try:
                     result = json.loads(recognizer.Result())
                     text = (result.get("text") or "").strip()
@@ -507,7 +575,6 @@ class VoiceToTextService:
                         segments.append(text)
                         self._ui_set_partial("")
                         if self.config.live_typing:
-                            # Only type words we haven't already typed.
                             seg_words = text.split()
                             if _starts_with_prefix(seg_words, committed_words):
                                 new_words = seg_words[len(committed_words) :]
@@ -515,13 +582,11 @@ class VoiceToTextService:
                                     _enqueue_words(" ".join(new_words))
                                     committed_words.extend(new_words)
                             else:
-                                # If alignment is off, just enqueue the whole segment.
                                 _enqueue_words(text)
                                 committed_words[:] = seg_words
                 except Exception:
                     pass
             else:
-                # Partial (intermediate) hypothesis.
                 if not self.config.live_typing:
                     return
                 try:
@@ -531,7 +596,6 @@ class VoiceToTextService:
                     if not ptxt:
                         return
                     pwords = ptxt.split()
-                    # Only type forward when Vosk's partial is a clean prefix extension.
                     if _starts_with_prefix(pwords, committed_words):
                         new_words = pwords[len(committed_words) :]
                         if new_words:
@@ -546,11 +610,9 @@ class VoiceToTextService:
                 channels=self.config.channels,
                 dtype=self.config.dtype,
                 callback=on_audio,
-                blocksize=0,  # let sounddevice pick a good block size
+                blocksize=0,
             ):
-                # Poll until stop pressed.
                 while not self._stop_event.is_set():
-                    # Flush any live text queued by the audio callback.
                     if self.config.live_typing:
                         to_type: list[str] = []
                         try:
@@ -560,17 +622,19 @@ class VoiceToTextService:
                             pass
 
                         if to_type:
-                            if self.config.restore_focus_to_target_app and self._target_app_name and not activated_once:
-                                self._activate_app(self._target_app_name)
+                            if (
+                                self.config.restore_focus_to_target_app
+                                and self._target_token is not None
+                                and not activated_once
+                            ):
+                                self._activate_target(self._target_token)
                                 time.sleep(0.10)
                                 activated_once = True
                             self._keyboard.type("".join(to_type))
 
                     time.sleep(self.config.live_flush_interval_s)
 
-            # After recording stops, flush any remaining queued partial text.
             if self.config.live_typing:
-                # Flush any remaining queued partial text.
                 to_type: list[str] = []
                 try:
                     while True:
@@ -578,13 +642,12 @@ class VoiceToTextService:
                 except queue.Empty:
                     pass
                 if to_type:
-                    if self.config.restore_focus_to_target_app and self._target_app_name and not activated_once:
-                        self._activate_app(self._target_app_name)
+                    if self.config.restore_focus_to_target_app and self._target_token is not None and not activated_once:
+                        self._activate_target(self._target_token)
                         time.sleep(0.10)
                         activated_once = True
                     self._keyboard.type("".join(to_type))
 
-            # Pull any remaining text.
             try:
                 final_res = json.loads(recognizer.FinalResult())
                 final_text = (final_res.get("text") or "").strip()
@@ -598,7 +661,6 @@ class VoiceToTextService:
                 print("[VoiceToText] (no speech recognized)")
                 return
 
-            # If live typing is enabled, only type any final words we didn't already type.
             final_to_type = ""
             if transcript:
                 if self.config.live_typing:
@@ -608,14 +670,13 @@ class VoiceToTextService:
                         if remaining:
                             final_to_type = " ".join(remaining)
                     else:
-                        # Alignment broke; fall back to typing the whole transcript.
                         final_to_type = transcript
                 else:
                     final_to_type = transcript
 
             if final_to_type:
-                if self.config.restore_focus_to_target_app and self._target_app_name:
-                    self._activate_app(self._target_app_name)
+                if self.config.restore_focus_to_target_app and self._target_token is not None:
+                    self._activate_target(self._target_token)
                     time.sleep(0.12)
 
                 if self.config.type_trailing_space:
@@ -633,26 +694,15 @@ class VoiceToTextService:
             self._stop_event.set()
 
 
-
-
+# ----------------------------
+# Entrypoint
+# ----------------------------
 if __name__ == "__main__":
-    # Run directly for quick testing:
-    #   python -m backend.services.voice_to_text
-    #   python -m backend.services.voice_to_text --gui
-    #   python -m backend.services.voice_to_text --overlay
     import argparse
 
     parser = argparse.ArgumentParser(description="EyeOS voice-to-text service")
-    parser.add_argument(
-        "--gui",
-        action="store_true",
-        help="Launch a small Start/Stop window (hotkeys still work)",
-    )
-    parser.add_argument(
-        "--overlay",
-        action="store_true",
-        help="Launch a macOS non-activating floating Start/Stop overlay",
-    )
+    parser.add_argument("--gui", action="store_true", help="Launch a small Start/Stop window (hotkeys still work)")
+    parser.add_argument("--overlay", action="store_true", help="Launch a macOS non-activating overlay (macOS only)")
     args = parser.parse_args()
 
     service = VoiceToTextService()
