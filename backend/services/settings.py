@@ -148,7 +148,7 @@ def export_settings(
     if include_keys is not None:
         subset = {}
         for k in include_keys:
-            val = read_settings(k, settings_file=settings_file)
+            val = read_settings(k, settings_file=settings_file) # type: ignore
             if val is not None:
                 subset[k] = val
         settings = subset

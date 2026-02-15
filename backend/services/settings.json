@@ -1,6 +1,12 @@
 {
-    "username": "moaaz",
-    "theme": "light",
-    "volume": 30,
-    "Dumbassness": 130
+    "ear_left": 0.22,
+    "ear_right": 0.21999999999999997,
+    "movement_gain": 1.0,
+    "appearance": "light",
+    "launch_on_startup": false,
+    "keep_pinned": true,
+    "camera_input": 0,
+    "gap": 10,
+    "scroll_mode": 0,
+    "blink_mode": 2
 }
