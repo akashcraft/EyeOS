@@ -36,7 +36,7 @@ def post_text(text: str) -> None:
         CGEventPost(kCGHIDEventTap, ev_up)
 
 # Bigger keys
-GAP = settings.read_settings("gap", ".vscode/settings.json", default=10)
+GAP = settings.read_settings("gap", "./backend/services/settings.json", default=10)
 MARGIN = GAP
 KEY_H = 30 + (GAP // 2)
 STD_W = 40 + (GAP // 2)
