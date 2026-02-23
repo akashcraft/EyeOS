@@ -6,6 +6,8 @@ import pyautogui
 import time
 import math
 import threading
+import sys
+import winreg
 from collections import deque
 import customtkinter as ctk
 from PIL import Image
@@ -678,3 +680,32 @@ root.bind("<space>", lambda e: start_pause())
 root.bind("<Escape>", lambda e: quit_app())
 root.protocol("WM_DELETE_WINDOW", quit_app)
 root.mainloop()
+
+APP_NAME = "EyeOS"
+
+def set_startup_windows(enable: bool):
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    if getattr(sys, 'frozen', False):
+        command = f'"{sys.executable}"'
+    else:
+        script_path = os.path.abspath(sys.argv[0])
+        command = f'"{sys.executable}" "{script_path}"'
+
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        key_path,
+        0,
+        winreg.KEY_ALL_ACCESS
+    ) as key:
+
+        if enable:
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
+            print("EyeOS will run at startup")
+        else:
+            try:
+                winreg.DeleteValue(key, APP_NAME)
+                print("EyeOS removed from startup")
+            except FileNotFoundError:
+                pass
+
