@@ -1,0 +1,83 @@
+[
+  {
+    "name": "open_chrome",
+    "phrases": ["open chrome", "launch chrome", "google chrome"],
+    "action": { "type": "open_app", "app": "chrome" }
+  },
+  {
+    "name": "open_edge",
+    "phrases": ["open edge", "launch edge", "microsoft edge"],
+    "action": { "type": "open_app", "app": "msedge" }
+  },
+  {
+    "name": "open_explorer",
+    "phrases": ["open explorer", "file explorer", "open files"],
+    "action": { "type": "open_app", "app": "explorer" }
+  },
+  {
+    "name": "open_settings",
+    "phrases": ["open settings", "system settings", "open system settings"],
+    "action": { "type": "open_app", "app": "ms-settings:" }
+  },
+  {
+    "name": "close_window",
+    "phrases": ["close window", "close tab", "close this"],
+    "action": { "type": "hotkey", "keys": ["alt", "f4"] }
+  },
+  {
+    "name": "new_tab",
+    "phrases": ["new tab", "open new tab"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "t"] }
+  },
+  {
+    "name": "next_tab",
+    "phrases": ["next tab", "switch tab right"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "tab"] }
+  },
+  {
+    "name": "previous_tab",
+    "phrases": ["previous tab", "switch tab left"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "shift", "tab"] }
+  },
+  {
+    "name": "copy",
+    "phrases": ["copy", "copy that"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "c"] }
+  },
+  {
+    "name": "paste",
+    "phrases": ["paste", "paste here"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "v"] }
+  },
+  {
+    "name": "cut",
+    "phrases": ["cut", "cut that"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "x"] }
+  },
+  {
+    "name": "select_all",
+    "phrases": ["select all"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "a"] }
+  },
+  {
+    "name": "undo",
+    "phrases": ["undo"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "z"] }
+  },
+  {
+    "name": "redo",
+    "phrases": ["redo"],
+    "action": { "type": "hotkey", "keys": ["ctrl", "y"] }
+  },
+
+  {
+    "name": "go_back",
+    "phrases": ["go back", "back"],
+    "action": { "type": "hotkey", "keys": ["alt", "left"] }
+  },
+  {
+    "name": "go_forward",
+    "phrases": ["go forward", "forward"],
+    "action": { "type": "hotkey", "keys": ["alt", "right"] }
+  }
+]

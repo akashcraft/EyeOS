@@ -1,0 +1,95 @@
+
+
+[
+  {
+    "name": "open_safari",
+    "phrases": ["open safari", "launch safari", "safari"],
+    "action": { "type": "open_app", "app": "Safari" }
+  },
+  {
+    "name": "open_chrome",
+    "phrases": ["open chrome", "launch chrome", "google chrome"],
+    "action": { "type": "open_app", "app": "Google Chrome" }
+  },
+  {
+    "name": "open_finder",
+    "phrases": ["open finder", "finder"],
+    "action": { "type": "open_app", "app": "Finder" }
+  },
+  {
+    "name": "open_terminal",
+    "phrases": ["open terminal", "launch terminal", "terminal"],
+    "action": { "type": "open_app", "app": "Terminal" }
+  },
+  {
+    "name": "open_settings",
+    "phrases": ["open settings", "system settings", "open system settings"],
+    "action": { "type": "open_app", "app": "System Settings" }
+  },
+  {
+    "name": "close_window",
+    "phrases": ["close window", "close tab", "close this"],
+    "action": { "type": "hotkey", "keys": ["cmd", "w"] }
+  },
+  {
+    "name": "new_tab",
+    "phrases": ["new tab", "open new tab"],
+    "action": { "type": "hotkey", "keys": ["cmd", "t"] }
+  },
+  {
+    "name": "next_tab",
+    "phrases": ["next tab", "switch tab right"],
+    "action": { "type": "hotkey", "keys": ["cmd", "shift", "]"] }
+  },
+  {
+    "name": "previous_tab",
+    "phrases": ["previous tab", "switch tab left"],
+    "action": { "type": "hotkey", "keys": ["cmd", "shift", "["] }
+  },
+  {
+    "name": "copy",
+    "phrases": ["copy", "copy that"],
+    "action": { "type": "hotkey", "keys": ["cmd", "c"] }
+  },
+  {
+    "name": "paste",
+    "phrases": ["paste", "paste here"],
+    "action": { "type": "hotkey", "keys": ["cmd", "v"] }
+  },
+  {
+    "name": "cut",
+    "phrases": ["cut", "cut that"],
+    "action": { "type": "hotkey", "keys": ["cmd", "x"] }
+  },
+  {
+    "name": "select_all",
+    "phrases": ["select all"],
+    "action": { "type": "hotkey", "keys": ["cmd", "a"] }
+  },
+  {
+    "name": "undo",
+    "phrases": ["undo"],
+    "action": { "type": "hotkey", "keys": ["cmd", "z"] }
+  },
+  {
+    "name": "redo",
+    "phrases": ["redo"],
+    "action": { "type": "hotkey", "keys": ["cmd", "shift", "z"] }
+  },
+
+  {
+    "name": "go_back",
+    "phrases": ["go back", "back"],
+    "action": { "type": "hotkey", "keys": ["cmd", "["] }
+  },
+  {
+    "name": "go_forward",
+    "phrases": ["go forward", "forward"],
+    "action": { "type": "hotkey", "keys": ["cmd", "]"] }
+  },
+  {
+    "name": "stop_listening",
+    "phrases": ["stop listening", "disable commands", "voice off"],
+    "action": { "type": "type_text", "text": "" }
+  }
+]
