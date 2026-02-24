@@ -56,6 +56,7 @@ RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 EAR_THRESHOLD_LEFT = settings.read_settings("ear_left", settings_file, default=0.22)
 EAR_THRESHOLD_RIGHT = settings.read_settings("ear_right", settings_file, default=0.22)
 MOVEMENT_GAIN = settings.read_settings("movement_gain", settings_file, default=1.0)
+CURSOR_SMOOTHING = settings.read_settings("cursor_smoothing", settings_file, default=0.35)
 
 blink_mode = settings.read_settings("blink_mode", settings_file, default=0)
 scroll_mode = settings.read_settings("scroll_mode", settings_file, default=0)
@@ -79,6 +80,30 @@ last_right_click = 0
 # EAR smoothing
 ear_queue_left = deque(maxlen=5)
 ear_queue_right = deque(maxlen=5)
+
+class CursorSmoother:
+    def __init__(self, alpha=0.35):
+        self.x = None
+        self.y = None
+        self.set_alpha(alpha)
+
+    def set_alpha(self, alpha):
+        self.alpha = max(0.05, min(0.95, float(alpha)))
+
+    def reset(self):
+        self.x = None
+        self.y = None
+
+    def update(self, target_x, target_y):
+        if self.x is None or self.y is None:
+            self.x = float(target_x)
+            self.y = float(target_y)
+        else:
+            self.x += self.alpha * (target_x - self.x)
+            self.y += self.alpha * (target_y - self.y)
+        return int(self.x), int(self.y)
+
+cursor_smoother = CursorSmoother(CURSOR_SMOOTHING)
 
 # Mouth clicker state machine (per-frame)
 mouth_clicker = MouthClicker(
@@ -231,6 +256,7 @@ def tracking_loop():
             if cap:
                 cap.release()
             cap = cv2.VideoCapture(utilities.get_camera_input())
+            cursor_smoother.reset()
 
         if cap is None or not cap.isOpened():
             continue
@@ -241,6 +267,7 @@ def tracking_loop():
             eyebrow_scroller.reset()
             lip_scroll.reset()
             lip_brow_scroll.reset()
+            cursor_smoother.reset()
             time.sleep(0.05)
             continue
 
@@ -271,8 +298,11 @@ def tracking_loop():
             gain = max(0.1, min(2.0, MOVEMENT_GAIN))
             target_x = int(norm_x * screen_width * gain)
             target_y = int(norm_y * screen_height * gain)
+            target_x = max(0, min(target_x, screen_width - 1))
+            target_y = max(0, min(target_y, screen_height - 1))
 
-            pyautogui.moveTo(target_x, target_y)
+            smooth_x, smooth_y = cursor_smoother.update(target_x, target_y)
+            pyautogui.moveTo(smooth_x, smooth_y)
 
             now = time.time()
 
@@ -526,6 +556,25 @@ def open_settings():
     move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain)  # pyright: ignore[reportArgumentType]
     move_slider.set(MOVEMENT_GAIN)
     move_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
+
+    # Cursor smoothing
+    smooth_frame = ctk.CTkFrame(win)
+    smooth_frame.pack(fill="x", padx=10, pady=5)
+    smooth_frame.columnconfigure(0, weight=1)
+    ctk.CTkLabel(smooth_frame, text="Cursor Smoothing").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+    smooth_val_lbl = ctk.CTkLabel(smooth_frame, text=f"{CURSOR_SMOOTHING:.2f}")
+    smooth_val_lbl.grid(row=0, column=1, sticky="e", padx=5, pady=5)
+
+    def update_smoothing(v):
+        global CURSOR_SMOOTHING
+        CURSOR_SMOOTHING = float(v)
+        cursor_smoother.set_alpha(CURSOR_SMOOTHING)
+        settings.write_settings("cursor_smoothing", CURSOR_SMOOTHING, settings_file)
+        smooth_val_lbl.configure(text=f"{CURSOR_SMOOTHING:.2f}")
+
+    smooth_slider = ctk.CTkSlider(smooth_frame, from_=0.05, to=0.95, number_of_steps=90, command=update_smoothing)  # pyright: ignore[reportArgumentType]
+    smooth_slider.set(CURSOR_SMOOTHING)
+    smooth_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
     # Keyboard Gap
     gap_frame = ctk.CTkFrame(win)

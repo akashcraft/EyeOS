@@ -2,6 +2,7 @@
     "ear_left": 0.22,
     "ear_right": 0.21999999999999997,
     "movement_gain": 1.0,
+    "cursor_smoothing": 0.35,
     "appearance": "light",
     "launch_on_startup": false,
     "keep_pinned": true,
