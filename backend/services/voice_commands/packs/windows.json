@@ -79,5 +79,34 @@
     "name": "go_forward",
     "phrases": ["go forward", "forward"],
     "action": { "type": "hotkey", "keys": ["alt", "right"] }
+  },
+  {
+    "name": "stop_listening",
+    "phrases": ["stop listening", "disable commands", "voice off"],
+    "action": { "type": "type_text", "text": "" }
+  }, {
+    "name": "open_mun",
+    "phrases": ["open mun", "mun login", "open online mun"],
+    "action": { "type": "open_url", "url": "https://online.mun.ca" }
+  }, {
+    "name": "open_wikipedia",
+    "phrases": ["open wikipedia", "wikipedia", "open wiki", "wiki"],
+    "action": { "type": "open_url", "url": "https://wikipedia.org" }
+  }, {
+    "name": "open_weather",
+    "phrases": ["open weather", "weather"],
+    "action": { "type": "open_url", "url": "https://weather.com" }
+  }, {
+    "name": "open_youtube",
+    "phrases": ["open youtube", "youtube"],
+    "action": { "type": "open_url", "url": "https://youtube.com" }
+  }, {
+    "name": "open_firefox",
+    "phrases": ["open firefox", "firefox"],
+    "action": { "type": "open_app", "app": "firefox" }
+  }, {
+    "name": "rick_roll",
+    "phrases": ["open rick roll", "rick roll", "open peak song", "open best song", "show me peak music"],
+    "action": { "type": "open_url", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
   }
 ]

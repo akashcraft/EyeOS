@@ -91,5 +91,9 @@
     "name": "stop_listening",
     "phrases": ["stop listening", "disable commands", "voice off"],
     "action": { "type": "type_text", "text": "" }
+  }, {
+    "name": "rick_roll",
+    "phrases": ["open rick roll", "rick roll", "open peak song", "open best song", "show me peak music"],
+    "action": { "type": "open_url", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }
   }
 ]
