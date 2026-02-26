@@ -7,7 +7,8 @@ import time
 import math
 import threading
 import sys
-import winreg
+import platform
+import subprocess
 from collections import deque
 import customtkinter as ctk
 from PIL import Image
@@ -155,7 +156,78 @@ lip_brow_scroll = LipEyebrowScrollController(
     show_debug=False,
 )
 
+# ------------------- OS STARTUP HELPERS -------------------
+APP_NAME = "EyeOS"
 
+def set_startup_windows(enable: bool):
+    """Manages Windows Registry startup entry."""
+    import winreg  # Imported locally to prevent crashing on macOS
+    
+    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    if getattr(sys, 'frozen', False):
+        command = f'"{sys.executable}"'
+    else:
+        script_path = os.path.abspath(sys.argv[0])
+        command = f'"{sys.executable}" "{script_path}"'
+
+    with winreg.OpenKey( # type: ignore
+        winreg.HKEY_CURRENT_USER, # type: ignore
+        key_path,
+        0,
+        winreg.KEY_ALL_ACCESS # type: ignore
+    ) as key:
+        if enable:
+            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command) # type: ignore
+            print("EyeOS will run at startup (Windows)")
+        else:
+            try:
+                winreg.DeleteValue(key, APP_NAME) # type: ignore
+                print("EyeOS removed from startup (Windows)")
+            except FileNotFoundError:
+                pass
+
+def set_macos_startup(enable: bool):
+    """Creates or removes a launchd plist file to manage macOS startup."""
+    PLIST_LABEL = "com.eyeos.startup"
+    LAUNCH_AGENTS_DIR = os.path.expanduser("~/Library/LaunchAgents")
+    PLIST_PATH = os.path.join(LAUNCH_AGENTS_DIR, f"{PLIST_LABEL}.plist")
+    
+    if enable:
+        os.makedirs(LAUNCH_AGENTS_DIR, exist_ok=True)
+        
+        if getattr(sys, 'frozen', False):
+            exec_args = f"<string>{sys.executable}</string>"
+        else:
+            python_exec = sys.executable
+            script_path = os.path.abspath(sys.argv[0])
+            exec_args = f"<string>{python_exec}</string>\n        <string>{script_path}</string>"
+
+        plist_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{PLIST_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        {exec_args}
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+"""
+        with open(PLIST_PATH, "w") as f:
+            f.write(plist_content)
+            
+        subprocess.run(["launchctl", "load", PLIST_PATH], capture_output=True)
+        print("EyeOS will run at startup (macOS)")
+    else:
+        if os.path.exists(PLIST_PATH):
+            subprocess.run(["launchctl", "unload", PLIST_PATH], capture_output=True)
+            os.remove(PLIST_PATH)
+            print("EyeOS removed from startup (macOS)")
 
 
 # ------------------- PEDAL CALLBACKS -------------------
@@ -516,7 +588,7 @@ def open_settings():
         settings.write_settings("ear_left", EAR_THRESHOLD_LEFT, settings_file)
         left_val_lbl.configure(text=f"{EAR_THRESHOLD_LEFT:.2f}")
 
-    left_slider = ctk.CTkSlider(left_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_left)  # pyright: ignore[reportArgumentType]
+    left_slider = ctk.CTkSlider(left_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_left)  # pyright: ignore
     left_slider.set(EAR_THRESHOLD_LEFT)
     left_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -535,7 +607,7 @@ def open_settings():
         right_val_lbl.configure(text=f"{EAR_THRESHOLD_RIGHT:.2f}")
 
 
-    right_slider = ctk.CTkSlider(right_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_right)  # pyright: ignore[reportArgumentType]
+    right_slider = ctk.CTkSlider(right_frame, from_=0.1, to=0.5, number_of_steps=50, command=update_right)  # pyright: ignore
     right_slider.set(EAR_THRESHOLD_RIGHT)
     right_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -553,7 +625,7 @@ def open_settings():
         settings.write_settings("movement_gain", MOVEMENT_GAIN, settings_file)
         move_val_lbl.configure(text=f"{MOVEMENT_GAIN:.2f}")
 
-    move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain)  # pyright: ignore[reportArgumentType]
+    move_slider = ctk.CTkSlider(move_frame, from_=0.3, to=1.5, number_of_steps=60, command=update_gain)  # pyright: ignore
     move_slider.set(MOVEMENT_GAIN)
     move_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -588,7 +660,7 @@ def open_settings():
         settings.write_settings("gap", int(v), settings_file)
         gap_val_lbl.configure(text=f"{int(v)}")
 
-    gap_slider = ctk.CTkSlider(gap_frame, from_=5, to=40, number_of_steps=35, command=update_gap)  # pyright: ignore[reportArgumentType]
+    gap_slider = ctk.CTkSlider(gap_frame, from_=5, to=40, number_of_steps=35, command=update_gap)  # pyright: ignore
     gap_slider.set(settings.read_settings("gap", settings_file, default=10))  # type: ignore
     gap_slider.grid(row=1, column=0, columnspan=2, sticky="ew", padx=5, pady=5)
 
@@ -603,10 +675,16 @@ def open_settings():
         value=settings.read_settings("keep_pinned",settings_file, default=False)
     )
 
-    # Empty callbacks for now
+    # Wired up the cross-platform callback!
     def on_launch_startup_toggle():
         value = launch_startup_var.get()
         settings.write_settings("launch_on_startup", value, settings_file)
+        
+        current_os = platform.system()
+        if current_os == "Windows":
+            set_startup_windows(value)
+        elif current_os == "Darwin":
+            set_macos_startup(value)
 
     def on_pinned_toggle():
         value = pinned_var.get()
@@ -729,32 +807,3 @@ root.bind("<space>", lambda e: start_pause())
 root.bind("<Escape>", lambda e: quit_app())
 root.protocol("WM_DELETE_WINDOW", quit_app)
 root.mainloop()
-
-APP_NAME = "EyeOS"
-
-def set_startup_windows(enable: bool):
-    key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-
-    if getattr(sys, 'frozen', False):
-        command = f'"{sys.executable}"'
-    else:
-        script_path = os.path.abspath(sys.argv[0])
-        command = f'"{sys.executable}" "{script_path}"'
-
-    with winreg.OpenKey(
-        winreg.HKEY_CURRENT_USER,
-        key_path,
-        0,
-        winreg.KEY_ALL_ACCESS
-    ) as key:
-
-        if enable:
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
-            print("EyeOS will run at startup")
-        else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-                print("EyeOS removed from startup")
-            except FileNotFoundError:
-                pass
-
