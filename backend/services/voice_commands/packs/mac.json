@@ -91,5 +91,10 @@
     "name": "stop_listening",
     "phrases": ["stop listening", "disable commands", "voice off"],
     "action": { "type": "type_text", "text": "" }
+  },
+  {
+    "name": "open_photo_booth",
+    "phrases": ["who is the most beautiful person on earth"],
+    "action": { "type": "open_app", "app": "Photo Booth" }
   }
 ]
