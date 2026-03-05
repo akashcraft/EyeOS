@@ -82,7 +82,7 @@ class VoiceCommandService:
         )
         self._vtt = VoiceToTextService(cfg)
 
-        self._vtt._keyboard = _CaptureKeyboard(self._on_vtt_text)
+        self._vtt._keyboard = _CaptureKeyboard(self._on_vtt_text) # type: ignore
 
         self._hotkeys = keyboard.GlobalHotKeys({self.toggle_hotkey: self.toggle})
 

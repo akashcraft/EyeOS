@@ -1,5 +1,7 @@
 import os
-import tkinter
+import json
+import shutil
+from tkinter import messagebox
 import cv2
 import mediapipe as mp
 import pyautogui
@@ -11,7 +13,7 @@ import platform
 import subprocess
 from collections import deque
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageTk
 import tkinter.filedialog as fd
 from pynput import keyboard
 from pynput.mouse import Button, Controller
@@ -22,6 +24,8 @@ from backend.services.mouth_click import MouthClicker
 from backend.services.eyebrow_scroll import EyebrowScroller
 from backend.services.lip_scroll import LipScrollController
 from backend.services.lip_eyebrow_scroll import LipEyebrowScrollController
+from backend.services.voice_commands.voice_commands import VoiceCommandService
+from backend.services.voice_to_text import VoiceToTextService, VoiceToTextConfig
 
 import global_var
 import utilities
@@ -31,6 +35,7 @@ pyautogui.FAILSAFE = False
 screen_width, screen_height = pyautogui.size()
 isSettingsOpen = False
 settings_file = "./backend/services/settings.json"
+voice_help_proc = None
 
 mouse = Controller()
 
@@ -82,6 +87,16 @@ last_right_click = 0
 ear_queue_left = deque(maxlen=5)
 ear_queue_right = deque(maxlen=5)
 
+system_os = platform.system()
+pack_file = None
+if system_os == "Darwin":
+    pack_file = "backend/services/voice_commands/packs/mac.json"
+elif system_os == "Windows":
+    pack_file = "backend/services/voice_commands/packs/windows.json"
+    
+voice_service = VoiceCommandService(pack_path=pack_file)
+stt_config = VoiceToTextConfig(restore_focus_to_target_app=False)
+stt_service = VoiceToTextService(config=stt_config)
 class CursorSmoother:
     def __init__(self, alpha=0.35):
         self.x = None
@@ -445,14 +460,25 @@ def start_pause():
         toggle_btn.configure(text="Pause", image=pause_icon)
 
 def quit_app():
+    global voice_help_proc
     stop_event.set()
     tracking_active.set()
+    voice_service.stop()
+    stt_service.stop()
+    if voice_help_proc and voice_help_proc.poll() is None:
+        voice_help_proc.terminate()
     root.destroy()
 
 def change_blink():
     global blink_mode
+    any_voice = voice_service.is_active or stt_service._is_recording
 
     blink_mode += 1
+    
+    # Prevent lips mode if voice/STT is active
+    if any_voice and blink_mode == 2:
+        blink_mode = 0
+        
     if blink_mode > 2 and scroll_mode == 0:
         blink_mode = 0
     if blink_mode > 1 and scroll_mode != 0:
@@ -502,6 +528,80 @@ def change_scroll():
         if blink_mode == 2:
             change_blink()
 
+def enforce_voice_constraints():
+    global scroll_mode, blink_mode
+    v_active = voice_service.is_active
+    s_active = stt_service._is_recording
+    any_voice = v_active or s_active
+
+    # XOR Logic: Disable the opposite button
+    stt_btn.configure(state="disabled" if v_active else "normal")
+    voice_btn.configure(state="disabled" if s_active else "normal")
+
+    if any_voice:
+        # Disable Scroll Mode
+        if scroll_mode != 0:
+            scroll_mode = 0
+            settings.write_settings("scroll_mode", scroll_mode, settings_file)
+            scroll_btn.configure(text="Disabled")
+            global_var.lip_scroll_enabled = False
+            global_var.lip_brow_scroll_enabled = False
+        scroll_btn.configure(state="disabled")
+
+        # Disable Lips Mode in Blink
+        if blink_mode == 2:
+            blink_mode = 0
+            settings.write_settings("blink_mode", blink_mode, settings_file)
+            blink_btn.configure(text="Blink", image=blink_icon)
+            global_var.blink_enabled = True
+            global_var.gaze_hold_enabled = False
+            global_var.mouth_click_enabled = False
+    else:
+        # Re-enable the scroll button if no voice service is running
+        scroll_btn.configure(state="normal")
+
+def toggle_voice_command():
+    voice_service.toggle()
+    update_voice_ui()
+    enforce_voice_constraints()
+
+def toggle_stt_command():
+    if stt_service._is_recording:
+        stt_service.stop()
+    else:
+        stt_service.start()
+    update_stt_ui()
+    enforce_voice_constraints()
+
+def update_voice_ui():
+    if voice_service.is_active:
+        voice_btn.configure(text="Listening")
+    else:
+        voice_btn.configure(text="CMD")
+
+def update_stt_ui():
+    if stt_service._is_recording:
+        stt_btn.configure(text="Listening")
+    else:
+        stt_btn.configure(text="STT")
+
+def sync_voice_state():
+    # Sync Voice
+    current_voice_text = voice_btn.cget("text")
+    is_listening = voice_service.is_active
+    if (is_listening and current_voice_text == "Voice") or (not is_listening and current_voice_text == "Listening"):
+        update_voice_ui()
+        enforce_voice_constraints()
+        
+    # Sync STT
+    current_stt_text = stt_btn.cget("text")
+    is_stt = stt_service._is_recording
+    if (is_stt and current_stt_text == "STT") or (not is_stt and current_stt_text == "Listening"):
+        update_stt_ui()
+        enforce_voice_constraints()
+        
+    root.after(200, sync_voice_state)
+
 def open_settings():
     global isSettingsOpen
     if isSettingsOpen:
@@ -509,9 +609,10 @@ def open_settings():
     settings_btn.configure(state="disabled")
     win = ctk.CTkToplevel()
     win.title("Settings")
-    win.geometry("360x620")
+    win.geometry("360x740")
     win.attributes("-topmost", True)
     isSettingsOpen = True
+    win.iconbitmap("resources/logo.ico")
 
     def on_close():
         global isSettingsOpen
@@ -710,16 +811,95 @@ def open_settings():
 
     # Import/Export Settings
     def import_settings():
-        fd.askopenfilename(title="Import Settings", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
+        file_path = fd.askopenfilename(title="Import Settings", filetypes=[("JSON files", "*.json"), ("All files", "*.*")])
+        if not file_path:
+            return
+            
+        try:
+            with open(file_path, "r") as f:
+                new_settings = json.load(f)
+                
+            if "ear_left" not in new_settings:
+                messagebox.showerror("Error", "Invalid settings file format.")
+                return
+
+            shutil.copy(file_path, settings_file)
+            messagebox.showinfo("Success", "Settings imported successfully!\nPlease restart EyeOS to fully apply the changes.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to import settings: {e}")
 
     def export_settings():
-        fd.asksaveasfilename(title="Export Settings", defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        file_path = fd.asksaveasfilename(title="Export Settings", defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        if not file_path:
+            return
+            
+        try:
+            shutil.copy(settings_file, file_path)
+            messagebox.showinfo("Success", "Settings exported successfully!")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to export settings: {e}")
 
     io_frame = ctk.CTkFrame(win)
     io_frame.pack(fill="x", padx=10, pady=5)
-    ctk.CTkButton(io_frame, text="Import Settings", command=import_settings).pack(side="left", expand=True, fill="x", padx=5, pady=10)
-    ctk.CTkButton(io_frame, text="Export Settings", command=export_settings).pack(side="right", expand=True, fill="x", padx=5, pady=10)
-    
+    io_frame.columnconfigure(0, weight=1)
+    io_frame.columnconfigure(1, weight=1)
+
+    ctk.CTkButton(io_frame, text="Import Settings", command=import_settings).grid(row=0, column=0, padx=5, pady=(10, 5), sticky="ew")
+    ctk.CTkButton(io_frame, text="Export Settings", command=export_settings).grid(row=0, column=1, padx=5, pady=(10, 5), sticky="ew")
+
+    def open_about():
+        about_btn.configure(state="disabled")
+        about_win = ctk.CTkToplevel(win)
+        about_win.title("About")
+        about_win.geometry("300x270")
+        about_win.attributes("-topmost", True)
+        about_win.iconbitmap("resources/logo.ico")
+
+        logo_img = ctk.CTkImage(Image.open("resources/logo.png"), size=(64, 64))
+        ctk.CTkLabel(about_win, text="", image=logo_img).pack(pady=(15, 5))
+        
+        ctk.CTkLabel(about_win, text="EyeOS - Capstone Project", font=("Arial", 14, "bold")).pack(pady=(0, 5))
+        ctk.CTkLabel(about_win, text="ECE 8010 Group 3").pack()
+        ctk.CTkLabel(about_win, text="Akash Samanta").pack()
+        ctk.CTkLabel(about_win, text="Matthew Fewer").pack()
+        ctk.CTkLabel(about_win, text="Moaaz Elshabasy").pack(pady=(0, 20))
+
+        def on_about_close():
+            about_btn.configure(state="normal")
+            about_win.destroy()
+
+        about_win.protocol("WM_DELETE_WINDOW", on_about_close)
+
+    def open_voice_help():
+        global voice_help_proc
+        voice_help_btn.configure(state="disabled")
+        
+        current_theme = ctk.get_appearance_mode()
+        
+        voice_help_proc = subprocess.Popen([
+            sys.executable, 
+            "-m", 
+            "backend.services.voice_commands.text_commands",
+            "--theme",
+            current_theme
+        ])
+        
+        def check_proc():
+            if not win.winfo_exists():
+                return
+            if voice_help_proc.poll() is None: # type: ignore
+                win.after(500, check_proc)
+            else:
+                voice_help_btn.configure(state="normal")
+                
+        check_proc()
+
+    about_btn = ctk.CTkButton(io_frame, text="About", command=open_about)
+    about_btn.grid(row=1, column=0, padx=5, pady=(5, 10), sticky="ew")
+
+    voice_help_btn = ctk.CTkButton(io_frame, text="Voice Help", command=open_voice_help)
+    voice_help_btn.grid(row=1, column=1, padx=5, pady=(5, 10), sticky="ew")
 
 # ------------------- MAIN -------------------
 appearance_mode = settings.read_settings("appearance", settings_file, default="dark")
@@ -728,9 +908,10 @@ ctk.set_default_color_theme("blue")
 
 root = ctk.CTk()
 root.title("EyeOS Control")
-root.geometry("770x70")
+root.geometry("880x70")
 root.resizable(False, False)
 root.attributes("-topmost", keep_pinned := settings.read_settings("keep_pinned", settings_file, default=False))
+root.iconbitmap("resources/logo.ico")
 
 bar = ctk.CTkFrame(root)
 bar.pack(fill="both", expand=True, padx=8, pady=8)
@@ -755,8 +936,11 @@ buttonWidth = 100
 toggle_btn = ctk.CTkButton(bar, text="Start", image=start_icon, command=start_pause, compound="left", font=("Arial", 13), width=buttonWidth)
 toggle_btn.pack(side="left", padx=4)
 
-voice_btn = ctk.CTkButton(bar, text="Voice", image=voice_icon, command=lambda: print("Voice Pressed"), compound="left", font=("Arial", 13), width=buttonWidth)
+voice_btn = ctk.CTkButton(bar, text="CMD", image=voice_icon, command=toggle_voice_command, compound="left", font=("Arial", 13), width=buttonWidth-10)
 voice_btn.pack(side="left", padx=4)
+
+stt_btn = ctk.CTkButton(bar, text="STT", image=voice_icon, command=toggle_stt_command, compound="left", font=("Arial", 13), width=buttonWidth-10)
+stt_btn.pack(side="left", padx=4)
 
 keyboard_btn = ctk.CTkButton(bar, text="Keyboard", image=keyboard_icon, command=utilities.open_onscreen_keyboard, compound="left", font=("Arial", 13), width=buttonWidth)
 keyboard_btn.pack(side="left", padx=4)
@@ -792,6 +976,7 @@ quit_btn.pack(side="right", padx=4)
 # Start tracking thread
 threading.Thread(target=tracking_loop, daemon=True).start()
 root.after(100, start_keyboard_listener)
+root.after(200, sync_voice_state)
 
 gaze = GazeClickService()
 
@@ -801,7 +986,6 @@ def start_gaze():
     gaze.attach_overlay(root)
 
 root.after(500, start_gaze)
-
 
 root.bind("<space>", lambda e: start_pause())
 root.bind("<Escape>", lambda e: quit_app())

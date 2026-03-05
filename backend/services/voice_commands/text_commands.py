@@ -4,16 +4,14 @@ import argparse
 import platform
 import tkinter as tk
 from tkinter import ttk
+import customtkinter as ctk
 
 try:
     from backend.services.voice_commands.commands import Command, build_commands
 except ModuleNotFoundError:
     from commands import Command, build_commands
 
-
 class _NoopKeyboardController:
-    """Keyboard stub so command actions can be built without executing anything."""
-
     def press(self, _key) -> None:
         return
 
@@ -23,34 +21,57 @@ class _NoopKeyboardController:
     def type(self, _text: str) -> None:
         return
 
-
 class TextCommandMenu:
-    def __init__(self) -> None:
+    def __init__(self, theme: str = "dark") -> None:
         self._keyboard = _NoopKeyboardController()
         self._commands: list[Command] = []
         self._by_name: dict[str, Command] = {}
 
-        self._root = tk.Tk()
+        ctk.set_appearance_mode(theme)
+        
+        self._root = ctk.CTk()
         self._root.title("EyeOS Voice Command Help")
         self._root.resizable(False, False)
+        self._root.attributes("-topmost", True)
+        self._root.lift()
 
         self._selected_name = tk.StringVar()
         self._phrases_var = tk.StringVar(value="All phrases: -")
         self._description_var = tk.StringVar(value="Description: -")
         self._status_var = tk.StringVar(value="Ready")
 
+        self._apply_treeview_style(theme)
         self._build_ui()
         self._selected_name.trace_add("write", self._on_selected_change)
         self._load_commands()
 
-    def _build_ui(self) -> None:
-        frame = ttk.Frame(self._root, padding=14)
-        frame.grid(row=0, column=0, sticky="nsew")
+    def _apply_treeview_style(self, theme: str) -> None:
+        style = ttk.Style(self._root)
+        style.theme_use("default")
+        
+        if theme.lower() == "dark":
+            bg_color = "#2b2b2b"
+            fg_color = "white"
+            head_bg = "#565b5e"
+            sel_bg = "#1f538d"
+        else:
+            bg_color = "#ebebeb"
+            fg_color = "black"
+            head_bg = "#d9d9d9"
+            sel_bg = "#3a7ebf"
 
-        title = ttk.Label(frame, text="Voice Command Help", font=("TkDefaultFont", 14, "bold"))
+        style.configure("Treeview", background=bg_color, foreground=fg_color, fieldbackground=bg_color, borderwidth=0)
+        style.configure("Treeview.Heading", background=head_bg, foreground=fg_color, borderwidth=0)
+        style.map("Treeview", background=[("selected", sel_bg)])
+
+    def _build_ui(self) -> None:
+        frame = ctk.CTkFrame(self._root, fg_color="transparent")
+        frame.grid(row=0, column=0, sticky="nsew", padx=14, pady=14)
+
+        title = ctk.CTkLabel(frame, text="Voice Command Help", font=("Arial", 16, "bold"))
         title.grid(row=0, column=0, columnspan=3, sticky="w")
 
-        os_label = ttk.Label(frame, text=f"OS: {platform.system()}")
+        os_label = ctk.CTkLabel(frame, text=f"OS: {platform.system()}")
         os_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 8))
 
         columns = ("name", "activation", "description")
@@ -64,28 +85,24 @@ class TextCommandMenu:
         self._table.grid(row=2, column=0, columnspan=3, sticky="nsew")
         self._table.bind("<<TreeviewSelect>>", self._on_table_selected)
 
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self._table.yview)
-        scrollbar.grid(row=2, column=3, sticky="ns")
+        scrollbar = ctk.CTkScrollbar(frame, orientation="vertical", command=self._table.yview)
+        scrollbar.grid(row=2, column=3, sticky="ns", padx=(5, 0))
         self._table.configure(yscrollcommand=scrollbar.set)
 
-        phrases = ttk.Label(frame, textvariable=self._phrases_var, wraplength=680, justify="left")
+        phrases = ctk.CTkLabel(frame, textvariable=self._phrases_var, wraplength=680, justify="left")
         phrases.grid(row=3, column=0, columnspan=3, sticky="w", pady=(8, 2))
 
-        description = ttk.Label(frame, textvariable=self._description_var, wraplength=680, justify="left")
+        description = ctk.CTkLabel(frame, textvariable=self._description_var, wraplength=680, justify="left")
         description.grid(row=4, column=0, columnspan=3, sticky="w", pady=(0, 10))
 
-        refresh_btn = ttk.Button(frame, text="Refresh", command=self._load_commands)
+        refresh_btn = ctk.CTkButton(frame, text="Refresh", command=self._load_commands)
         refresh_btn.grid(row=5, column=0, sticky="w")
 
-        status = ttk.Label(frame, textvariable=self._status_var, foreground="#666666")
+        status = ctk.CTkLabel(frame, textvariable=self._status_var, text_color="gray")
         status.grid(row=6, column=0, columnspan=3, sticky="w", pady=(10, 0))
 
-        frame.columnconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
-        frame.columnconfigure(2, weight=1)
-
     def _load_commands(self) -> None:
-        self._commands = build_commands(self._keyboard)
+        self._commands = build_commands(self._keyboard) # type: ignore
         self._by_name = {c.name: c for c in self._commands}
 
         names = sorted(self._by_name.keys())
@@ -136,12 +153,11 @@ class TextCommandMenu:
     def run(self) -> None:
         self._root.mainloop()
 
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="EyeOS text command menu")
-    parser.parse_args()
-    TextCommandMenu().run()
-
+    parser.add_argument("--theme", default="dark")
+    args = parser.parse_args()
+    TextCommandMenu(theme=args.theme).run()
 
 if __name__ == "__main__":
     main()
